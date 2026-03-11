@@ -73,10 +73,10 @@ $$ LANGUAGE plpgsql;
 
 -- 4. Students who did NOT participate
 CREATE OR REPLACE FUNCTION get_absent_students(p_contest_name TEXT)
-RETURNS TABLE (name TEXT) AS $$
+RETURNS TABLE (id UUID, name TEXT, dept TEXT, section TEXT, year INT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT s.name
+    SELECT s.id, s.name, s.department as dept, s.section, s.year
     FROM students s
     WHERE s.hackerrank_username NOT IN (
         SELECT l.username
