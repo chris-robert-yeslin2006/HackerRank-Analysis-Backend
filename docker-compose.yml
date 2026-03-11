@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    environment:
+      - ENVIRONMENT=development
+      # Add environment variables for Firebase credentials later
+      # - FIREBASE_CREDENTIALS=/app/serviceAccountKey.json
