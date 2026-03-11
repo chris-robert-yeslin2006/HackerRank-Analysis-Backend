@@ -1,17 +1,61 @@
-from fastapi import FastAPI
-import firebase_admin
-from firebase_admin import credentials
+import os
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from supabase import create_client, Client
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import date
+from dotenv import load_dotenv
+import csv
+import io
+import httpx
+
+# Load environment variables
+load_dotenv()
 
 # Initialize FastAPI app
 app = FastAPI(
     title="HackerRank Analysis API",
-    description="API for HackerRank Analysis Backend",
+    description="API for HackerRank Analysis Backend with Supabase",
     version="1.0.0"
 )
 
-# TODO: Initialize Firebase Admin SDK once the db manager provides schema & collections
-# cred = credentials.Certificate("path/to/serviceAccountKey.json")
-# firebase_admin.initialize_app(cred)
+# CORS setup for future frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize Supabase client
+url: str = os.environ.get("SUPABASE_URL")
+key: str = os.environ.get("SUPABASE_KEY")
+
+if not url or not key:
+    raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set in the environment.")
+
+supabase: Client = create_client(url, key)
+
+# --- Pydantic Models for Data Ingestion ---
+
+class StudentCreate(BaseModel):
+    roll_no: str
+    name: str
+    department: str
+    section: str
+    year: int
+    hackerrank_username: str
+
+class LeaderboardEntryCreate(BaseModel):
+    contest_name: str
+    contest_date: Optional[date] = None
+    username: str
+    score: int
+    time_taken: Optional[int] = None
+
+# --- Basic Endpoints ---
 
 @app.get("/")
 def read_root():
@@ -19,4 +63,123 @@ def read_root():
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
+    return {"status": "ok", "supabase_connected": supabase is not None}
+
+# --- Data Ingestion Endpoints (Optional but helpful) ---
+
+@app.post("/students")
+def add_student(student: StudentCreate):
+    try:
+        response = supabase.table("students").insert(student.model_dump()).execute()
+        return {"message": "Student added successfully", "data": response.data}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/students/bulk")
+async def add_students_bulk(file: UploadFile = File(...)):
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="Only CSV files are allowed")
+    
+    try:
+        content = await file.read()
+        decoded = content.decode('utf-8')
+        reader = csv.DictReader(io.StringIO(decoded))
+        
+        students_data = []
+        for row in reader:
+            # Clean up headers (remove BOM or spaces if any)
+            cleaned_row = {k.strip('\ufeff ').lower(): v.strip() for k, v in row.items()}
+            
+            # Require minimum fields
+            if not all(k in cleaned_row for k in ["roll_no", "name", "department", "section", "year", "hackerrank_username"]):
+                raise HTTPException(status_code=400, detail="CSV is missing required headers (roll_no, name, department, section, year, hackerrank_username)")
+            
+            students_data.append({
+                "roll_no": cleaned_row["roll_no"],
+                "name": cleaned_row["name"],
+                "department": cleaned_row["department"],
+                "section": cleaned_row["section"],
+                "year": int(cleaned_row["year"]),
+                "hackerrank_username": cleaned_row["hackerrank_username"]
+            })
+            
+        if not students_data:
+            raise HTTPException(status_code=400, detail="CSV file is empty")
+            
+        response = supabase.table("students").insert(students_data).execute()
+        return {"message": "Bulk upload successful", "inserted": len(students_data)}
+        
+    except httpx.HTTPStatusError as e:
+        # Better error handling for Supabase duplication errors
+        error_detail = e.response.json()
+        raise HTTPException(status_code=400, detail=f"Database error: {error_detail.get('message', str(e))}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/leaderboard")
+def add_leaderboard_entry(entry: LeaderboardEntryCreate):
+    try:
+        # Convert date to string if present
+        data = entry.model_dump()
+        if data.get("contest_date"):
+            data["contest_date"] = data["contest_date"].isoformat()
+            
+        response = supabase.table("leaderboard").insert(data).execute()
+        return {"message": "Leaderboard entry added successfully", "data": response.data}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/leaderboard/bulk")
+def add_leaderboard_bulk(entries: List[LeaderboardEntryCreate]):
+    try:
+        data = []
+
+        for entry in entries:
+            row = entry.model_dump()
+
+            if row.get("contest_date"):
+                row["contest_date"] = row["contest_date"].isoformat()
+
+            data.append(row)
+
+        response = supabase.table("leaderboard").insert(data).execute()
+
+        return {"message": "Bulk upload successful", "inserted": len(data)}
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# --- Analytics Endpoints ---
+
+@app.get("/analytics/department")
+def get_department_leaderboard():
+    try:
+        # Calling the RPC function deployed on Supabase
+        response = supabase.rpc("get_department_leaderboard").execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching data. Did you run the RPC SQL in Supabase? Error: {str(e)}")
+
+@app.get("/analytics/section")
+def get_section_leaderboard():
+    try:
+        response = supabase.rpc("get_section_leaderboard").execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/analytics/top-students")
+def get_top_students():
+    try:
+        response = supabase.rpc("get_top_students").execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/analytics/absent-students/{contest_name}")
+def get_absent_students(contest_name: str):
+    try:
+        response = supabase.rpc("get_absent_students", {"p_contest_name": contest_name}).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

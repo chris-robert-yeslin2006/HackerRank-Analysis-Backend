@@ -9,5 +9,6 @@ services:
       - .:/app
     environment:
       - ENVIRONMENT=development
-      # Add environment variables for Firebase credentials later
-      # - FIREBASE_CREDENTIALS=/app/serviceAccountKey.json
+      # Add environment variables for Supabase later
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_KEY=${SUPABASE_KEY:-}
