@@ -1,14 +1,37 @@
 # HackerRank Analysis Backend API
 
-This document provides a summary of all available APIs for the frontend dev to test out.
+This document provides a complete and updated summary of all available APIs for the frontend developer.
 
 **Base URL**: `http://127.0.0.1:8000`
 
 ---
 
-## Data Ingestion Endpoints
+## Authentication Endpoints
 
-### 1. Add Single Student
+### 1. Admin Login
+Logs in the administrator and securely sets an authentication cookie.
+- **Method**: `POST`
+- **Endpoint**: `/login`
+- **Body**:
+  ```json
+  {
+    "username": "admin",
+    "password": "Admin@123"
+  }
+  ```
+- **Response**: `200 OK` (Sets `HttpOnly` cookie: `auth_token=true`)
+
+---
+
+## Data Ingestion Endpoints (Students)
+
+### 2. Get All Students
+Fetches all students from the database. Use this to retrieve the `id` (UUID) needed to edit or delete a specific student.
+- **Method**: `GET`
+- **Endpoint**: `/students`
+- **Returns**: Array of Student objects
+
+### 3. Add Single Student
 Adds a single student to the database.
 - **Method**: `POST`
 - **Endpoint**: `/students`
@@ -24,18 +47,18 @@ Adds a single student to the database.
   }
   ```
 
-### 2. Bulk Upload Students (CSV)
+### 4. Bulk Upload Students (CSV)
 Uploads multiple students at once via a CSV file.
 - **Method**: `POST`
 - **Endpoint**: `/students/bulk`
 - **Body**: `multipart/form-data`
-  - [file](file:///Users/yeslin-parker/project/HackerRank-Analysis-Backend/Dockerfile): The `.csv` file containing headers: `roll_no`, `name`, [department](file:///Users/yeslin-parker/project/HackerRank-Analysis-Backend/main.py#180-188), [section](file:///Users/yeslin-parker/project/HackerRank-Analysis-Backend/main.py#189-196), `year`, `hackerrank_username`.
+  - `file`: The `.csv` file containing headers: `roll_no`, `name`, `department`, `section`, `year`, `hackerrank_username`.
 
-### 3. Update Single Student
-Edits an existing student's data. You can pass only the fields you want to change.
+### 5. Update Single Student
+Edits an existing student's data. You only need to pass the fields you want to change.
 - **Method**: `PATCH`
 - **Endpoint**: `/students/{student_id}`
-- **Body**: (Partial JSON object)
+- **Body**: (Partial object)
   ```json
   {
     "department": "IT",
@@ -43,20 +66,16 @@ Edits an existing student's data. You can pass only the fields you want to chang
   }
   ```
 
-### 4. Delete Single Student
-Deletes a student by their ID. This only removes the student and does not delete their leaderboard records.
-
+### 6. Delete Single Student
+Deletes a student by their ID. This only removes the student and does not delete their leaderboard contest records.
 - **Method**: `DELETE`
 - **Endpoint**: `/students/{student_id}`
-- **Body**: (Partial JSON object)
-  ```json
-  {
-    "department": "IT",
-    "year": 2
-  }
-  ```
 
-### 5. Add Single Leaderboard Entry
+---
+
+## Data Ingestion Endpoints (Leaderboard)
+
+### 7. Add Single Leaderboard Entry
 Adds a single scraped contest result.
 - **Method**: `POST`
 - **Endpoint**: `/leaderboard`
@@ -71,28 +90,17 @@ Adds a single scraped contest result.
   }
   ```
 
-### 6. Bulk Upload Leaderboard Entries
+### 8. Bulk Upload Leaderboard Entries
 Uploads multiple scraped contest results at once.
 - **Method**: `POST`
 - **Endpoint**: `/leaderboard/bulk`
 - **Body**: Array of JSON objects
-  ```json
-  [
-    {
-      "contest_name": "week1_batch1",
-      "contest_date": "2023-10-01",
-      "username": "jane_hr",
-      "score": 150,
-      "time_taken": 45
-    }
-  ]
-  ```
 
 ---
 
 ## Analytics Endpoints
 
-### 7. Frontend Raw Data
+### 9. Frontend Raw Data
 Returns deeply nested rank and leaderboard info tailored specifically for the frontend display table.
 - **Method**: `GET`
 - **Endpoint**: `/frontend-data`
@@ -118,22 +126,22 @@ Returns deeply nested rank and leaderboard info tailored specifically for the fr
   ]
   ```
 
-### 8. Department Leaderboard
+### 10. Department Leaderboard
 Aggregated total scores grouped by department.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/department`
 
-### 9. Section Leaderboard
+### 11. Section Leaderboard
 Aggregated total scores grouped by section.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/section`
 
-### 10. Top 10 Students
+### 12. Top 10 Students
 Returns the top 10 students across all contests sorted by total score.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/top-students`
 
-### 11. Absent Students for Contest
+### 13. Absent Students for Contest
 Returns all students who did NOT participate in a given `contest_name`.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/absent-students/{contest_name}`
@@ -154,30 +162,7 @@ Returns all students who did NOT participate in a given `contest_name`.
 
 ## Utility Endpoints
 
-### 12. Health Check
+### 14. Health Check
 Check the server status and Supabase connection.
 - **Method**: `GET`
 - **Endpoint**: `/health`
-
----
-
-## Authentication Endpoints
-
-### 13. Admin Login
-Logs in the administrator. On success, this endpoint returns a `200 OK` and sets an `HttpOnly` cookie named `auth_token` with the value `true`. The frontend can check this cookie presence using credentials/middleware.
-- **Method**: `POST`
-- **Endpoint**: `/login`
-- **Body**:
-  ```json
-  {
-    "username": "admin",
-    "password": "Admin@123"
-  }
-  ```
-- **Response**:
-  ```json
-  {
-    "message": "Login successful",
-    "authenticated": true
-  }
-  ```

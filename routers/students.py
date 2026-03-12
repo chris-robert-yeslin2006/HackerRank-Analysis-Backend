@@ -7,6 +7,15 @@ import httpx
 
 router = APIRouter(tags=["Students"])
 
+@router.get("/students")
+def get_all_students():
+    try:
+        # Fetch all students from the database
+        response = supabase.table("students").select("*").execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.post("/students")
 def add_student(student: StudentCreate):
     try:
