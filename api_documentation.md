@@ -158,3 +158,26 @@ Returns all students who did NOT participate in a given `contest_name`.
 Check the server status and Supabase connection.
 - **Method**: `GET`
 - **Endpoint**: `/health`
+
+---
+
+## Authentication Endpoints
+
+### 13. Admin Login
+Logs in the administrator. On success, this endpoint returns a `200 OK` and sets an `HttpOnly` cookie named `auth_token` with the value `true`. The frontend can check this cookie presence using credentials/middleware.
+- **Method**: `POST`
+- **Endpoint**: `/login`
+- **Body**:
+  ```json
+  {
+    "username": "admin",
+    "password": "Admin@123"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "message": "Login successful",
+    "authenticated": true
+  }
+  ```

@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Response
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client, Client
 from pydantic import BaseModel
@@ -63,6 +63,10 @@ class LeaderboardEntryCreate(BaseModel):
     score: int
     time_taken: Optional[int] = None
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
 # --- Basic Endpoints ---
 
 @app.get("/")
@@ -72,6 +76,26 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "ok", "supabase_connected": supabase is not None}
+
+# --- Auth Endpoint ---
+
+@app.post("/login")
+def login(login_data: LoginRequest, response: Response):
+    # Hardcoded admin credentials as requested
+    if login_data.username == "admin" and login_data.password == "Admin@123":
+        # Set a cookie named 'auth_token' with value 'true'
+        # httponly=True protects it from cross-site scripting (XSS)
+        # samesite='lax' allows it to be sent with top-level navigations
+        response.set_cookie(
+            key="auth_token", 
+            value="true", 
+            httponly=True, 
+            samesite="lax",
+            max_age=86400 # 1 day expiration
+        )
+        return {"message": "Login successful", "authenticated": True}
+    else:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
 
 # --- Data Ingestion Endpoints (Optional but helpful) ---
 
