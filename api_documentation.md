@@ -29,9 +29,34 @@ Uploads multiple students at once via a CSV file.
 - **Method**: `POST`
 - **Endpoint**: `/students/bulk`
 - **Body**: `multipart/form-data`
-  - [file](file:///Users/yeslin-parker/project/HackerRank-Analysis-Backend/Dockerfile): The `.csv` file containing headers: `roll_no`, `name`, [department](file:///Users/yeslin-parker/project/HackerRank-Analysis-Backend/main.py#154-162), [section](file:///Users/yeslin-parker/project/HackerRank-Analysis-Backend/main.py#163-170), `year`, `hackerrank_username`.
+  - [file](file:///Users/yeslin-parker/project/HackerRank-Analysis-Backend/Dockerfile): The `.csv` file containing headers: `roll_no`, `name`, [department](file:///Users/yeslin-parker/project/HackerRank-Analysis-Backend/main.py#180-188), [section](file:///Users/yeslin-parker/project/HackerRank-Analysis-Backend/main.py#189-196), `year`, `hackerrank_username`.
 
-### 3. Add Single Leaderboard Entry
+### 3. Update Single Student
+Edits an existing student's data. You can pass only the fields you want to change.
+- **Method**: `PATCH`
+- **Endpoint**: `/students/{student_id}`
+- **Body**: (Partial JSON object)
+  ```json
+  {
+    "department": "IT",
+    "year": 2
+  }
+  ```
+
+### 4. Delete Single Student
+Deletes a student by their ID. This only removes the student and does not delete their leaderboard records.
+
+- **Method**: `DELETE`
+- **Endpoint**: `/students/{student_id}`
+- **Body**: (Partial JSON object)
+  ```json
+  {
+    "department": "IT",
+    "year": 2
+  }
+  ```
+
+### 5. Add Single Leaderboard Entry
 Adds a single scraped contest result.
 - **Method**: `POST`
 - **Endpoint**: `/leaderboard`
@@ -46,7 +71,7 @@ Adds a single scraped contest result.
   }
   ```
 
-### 4. Bulk Upload Leaderboard Entries
+### 6. Bulk Upload Leaderboard Entries
 Uploads multiple scraped contest results at once.
 - **Method**: `POST`
 - **Endpoint**: `/leaderboard/bulk`
@@ -67,7 +92,7 @@ Uploads multiple scraped contest results at once.
 
 ## Analytics Endpoints
 
-### 5. Frontend Raw Data
+### 7. Frontend Raw Data
 Returns deeply nested rank and leaderboard info tailored specifically for the frontend display table.
 - **Method**: `GET`
 - **Endpoint**: `/frontend-data`
@@ -93,22 +118,22 @@ Returns deeply nested rank and leaderboard info tailored specifically for the fr
   ]
   ```
 
-### 6. Department Leaderboard
+### 8. Department Leaderboard
 Aggregated total scores grouped by department.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/department`
 
-### 7. Section Leaderboard
+### 9. Section Leaderboard
 Aggregated total scores grouped by section.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/section`
 
-### 8. Top 10 Students
+### 10. Top 10 Students
 Returns the top 10 students across all contests sorted by total score.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/top-students`
 
-### 9. Absent Students for Contest
+### 11. Absent Students for Contest
 Returns all students who did NOT participate in a given `contest_name`.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/absent-students/{contest_name}`
@@ -129,7 +154,7 @@ Returns all students who did NOT participate in a given `contest_name`.
 
 ## Utility Endpoints
 
-### 10. Health Check
+### 12. Health Check
 Check the server status and Supabase connection.
 - **Method**: `GET`
 - **Endpoint**: `/health`

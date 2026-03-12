@@ -48,6 +48,14 @@ class StudentCreate(BaseModel):
     year: int
     hackerrank_username: str
 
+class StudentUpdate(BaseModel):
+    roll_no: Optional[str] = None
+    name: Optional[str] = None
+    department: Optional[str] = None
+    section: Optional[str] = None
+    year: Optional[int] = None
+    hackerrank_username: Optional[str] = None
+
 class LeaderboardEntryCreate(BaseModel):
     contest_name: str
     contest_date: Optional[date] = None
@@ -113,6 +121,37 @@ async def add_students_bulk(file: UploadFile = File(...)):
         # Better error handling for Supabase duplication errors
         error_detail = e.response.json()
         raise HTTPException(status_code=400, detail=f"Database error: {error_detail.get('message', str(e))}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.patch("/students/{student_id}")
+def update_student(student_id: str, student_update: StudentUpdate):
+    try:
+        # Pass exclude_unset=True to only update the fields provided in the payload
+        update_data = student_update.model_dump(exclude_unset=True)
+        
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No fields provided to update")
+
+        response = supabase.table("students").update(update_data).eq("id", student_id).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Student not found")
+            
+        return {"message": "Student updated successfully", "data": response.data[0]}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.delete("/students/{student_id}")
+def delete_student(student_id: str):
+    try:
+        response = supabase.table("students").delete().eq("id", student_id).execute()
+        
+        # When a deletion doesn't match any row, Supabase returns an empty data list
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Student not found")
+            
+        return {"message": "Student deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
