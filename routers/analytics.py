@@ -32,7 +32,7 @@ def get_top_students():
 def get_absent_students(contest_name: str):
     try:
         response = supabase.rpc("get_absent_students", {"p_contest_name": contest_name}).execute()
-        # The RPC will now return {"id": str, "name": str, "dept": str, "section": str, "year": int}
+        # The RPC will now return {"id": str, "hackerrank_username": str, "name": str, "dept": str, "section": str, "year": int}
         return response.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

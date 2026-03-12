@@ -149,7 +149,8 @@ Returns all students who did NOT participate in a given `contest_name`.
   ```json
   [
     {
-      "id": "abc-123",
+      "id": "abc-123-uuid",
+      "hackerrank_username": "john_hr",
       "name": "John Doe",
       "dept": "IT",
       "section": "B",
