@@ -30,6 +30,19 @@ Fetches all students from the database. Use this to retrieve the `id` (UUID) nee
 - **Method**: `GET`
 - **Endpoint**: `/students`
 - **Returns**: Array of Student objects
+  ```json
+  [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "roll_no": "23CS001",
+      "name": "Jane Doe",
+      "department": "CSE",
+      "section": "A",
+      "year": 1,
+      "hackerrank_username": "jane_hr"
+    }
+  ]
+  ```
 
 ### 3. Add Single Student
 Adds a single student to the database.
@@ -46,6 +59,21 @@ Adds a single student to the database.
     "hackerrank_username": "jane_hr"
   }
   ```
+- **Response**:
+  ```json
+  {
+    "message": "Student added successfully",
+    "data": {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "roll_no": "23CS001",
+      "name": "Jane Doe",
+      "department": "CSE",
+      "section": "A",
+      "year": 1,
+      "hackerrank_username": "jane_hr"
+    }
+  }
+  ```
 
 ### 4. Bulk Upload Students (CSV)
 Uploads multiple students at once via a CSV file.
@@ -53,6 +81,14 @@ Uploads multiple students at once via a CSV file.
 - **Endpoint**: `/students/bulk`
 - **Body**: `multipart/form-data`
   - `file`: The `.csv` file containing headers: `roll_no`, `name`, `department`, `section`, `year`, `hackerrank_username`.
+- **Response**:
+  ```json
+  {
+    "message": "Bulk upload successful",
+    "inserted": 25,
+    "data": [ ... ]
+  }
+  ```
 
 ### 5. Update Single Student
 Edits an existing student's data. You only need to pass the fields you want to change.
@@ -63,6 +99,21 @@ Edits an existing student's data. You only need to pass the fields you want to c
   {
     "department": "IT",
     "year": 2
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "message": "Student updated successfully",
+    "data": {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "roll_no": "23CS001",
+      "name": "Jane Doe",
+      "department": "IT",
+      "section": "A",
+      "year": 2,
+      "hackerrank_username": "jane_hr"
+    }
   }
   ```
 
@@ -114,6 +165,7 @@ Returns deeply nested rank and leaderboard info tailored specifically for the fr
       "contests": {
         "week1_batch1": {
           "jane_hr": {
+            "id": "550e8400-e29b-41d4-a716-446655440000",
             "name": "Jane Doe",
             "user-id": "jane_hr",
             "score": 150,
@@ -140,6 +192,16 @@ Aggregated total scores grouped by section.
 Returns the top 10 students across all contests sorted by total score.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/top-students`
+- **Returns**: Array of objects
+  ```json
+  [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Jane Doe",
+      "total_score": 1500
+    }
+  ]
+  ```
 
 ### 13. Absent Students for Contest
 Returns all students who did NOT participate in a given `contest_name`.

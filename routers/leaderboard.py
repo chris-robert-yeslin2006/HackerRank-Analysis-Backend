@@ -14,9 +14,11 @@ def add_leaderboard_entry(entry: LeaderboardEntryCreate):
             data["contest_date"] = data["contest_date"].isoformat()
             
         response = supabase.table("leaderboard").insert(data).execute()
-        return {"message": "Leaderboard entry added successfully", "data": response.data}
+        if not response.data:
+             raise HTTPException(status_code=400, detail="Failed to add leaderboard entry")
+        return {"message": "Leaderboard entry added successfully", "data": response.data[0]}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Error adding entry: {str(e)}")
 
 @router.post("/leaderboard/bulk")
 def add_leaderboard_bulk(entries: List[LeaderboardEntryCreate]):
@@ -31,9 +33,12 @@ def add_leaderboard_bulk(entries: List[LeaderboardEntryCreate]):
 
             data.append(row)
 
+        if not data:
+            raise HTTPException(status_code=400, detail="No entries provided")
+
         response = supabase.table("leaderboard").insert(data).execute()
 
-        return {"message": "Bulk upload successful", "inserted": len(data)}
+        return {"message": "Bulk upload successful", "inserted": len(response.data), "data": response.data}
 
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Bulk upload failed: {str(e)}")

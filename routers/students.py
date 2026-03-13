@@ -1,28 +1,30 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from database import supabase
-from schemas import StudentCreate, StudentUpdate
+from schemas import StudentCreate, StudentUpdate, Student
+from typing import List
 import csv
 import io
-import httpx
 
 router = APIRouter(tags=["Students"])
 
-@router.get("/students")
+@router.get("/students", response_model=List[Student])
 def get_all_students():
     try:
         # Fetch all students from the database
         response = supabase.table("students").select("*").execute()
         return response.data
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Failed to fetch students: {str(e)}")
 
 @router.post("/students")
 def add_student(student: StudentCreate):
     try:
         response = supabase.table("students").insert(student.model_dump()).execute()
-        return {"message": "Student added successfully", "data": response.data}
+        if not response.data:
+            raise HTTPException(status_code=400, detail="Failed to add student")
+        return {"message": "Student added successfully", "data": response.data[0]}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Error adding student: {str(e)}")
 
 @router.post("/students/bulk")
 async def add_students_bulk(file: UploadFile = File(...)):
@@ -31,39 +33,42 @@ async def add_students_bulk(file: UploadFile = File(...)):
     
     try:
         content = await file.read()
-        decoded = content.decode('utf-8')
+        decoded = content.decode('utf-8-sig') # Handle BOM
         reader = csv.DictReader(io.StringIO(decoded))
         
         students_data = []
         for row in reader:
-            # Clean up headers (remove BOM or spaces if any)
-            cleaned_row = {k.strip('\ufeff ').lower(): v.strip() for k, v in row.items()}
+            # Clean up headers (case-insensitive and trimmed)
+            cleaned_row = {k.strip().lower(): v.strip() for k, v in row.items() if k}
             
-            # Require minimum fields
-            if not all(k in cleaned_row for k in ["roll_no", "name", "department", "section", "year", "hackerrank_username"]):
-                raise HTTPException(status_code=400, detail="CSV is missing required headers (roll_no, name, department, section, year, hackerrank_username)")
+            required_fields = ["roll_no", "name", "department", "section", "year", "hackerrank_username"]
+            if not all(field in cleaned_row for field in required_fields):
+                missing = [f for f in required_fields if f not in cleaned_row]
+                raise HTTPException(status_code=400, detail=f"CSV missing required headers: {', '.join(missing)}")
             
+            try:
+                year_val = int(cleaned_row["year"])
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid year value for student {cleaned_row.get('name', 'unknown')}")
+
             students_data.append({
                 "roll_no": cleaned_row["roll_no"],
                 "name": cleaned_row["name"],
                 "department": cleaned_row["department"],
                 "section": cleaned_row["section"],
-                "year": int(cleaned_row["year"]),
+                "year": year_val,
                 "hackerrank_username": cleaned_row["hackerrank_username"]
             })
             
         if not students_data:
             raise HTTPException(status_code=400, detail="CSV file is empty")
             
-        response = supabase.table("students").insert(students_data).execute()
-        return {"message": "Bulk upload successful", "inserted": len(students_data)}
+        # Use upsert to handle existing records if roll_no or username matches
+        response = supabase.table("students").upsert(students_data, on_conflict="roll_no").execute()
+        return {"message": "Bulk upload successful", "inserted": len(response.data), "data": response.data}
         
-    except httpx.HTTPStatusError as e:
-        # Better error handling for Supabase duplication errors
-        error_detail = e.response.json()
-        raise HTTPException(status_code=400, detail=f"Database error: {error_detail.get('message', str(e))}")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Bulk upload failed: {str(e)}")
 
 @router.patch("/students/{student_id}")
 def update_student(student_id: str, student_update: StudentUpdate):

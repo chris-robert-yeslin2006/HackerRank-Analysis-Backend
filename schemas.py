@@ -2,13 +2,19 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import date
 
-class StudentCreate(BaseModel):
+class StudentBase(BaseModel):
     roll_no: str
     name: str
     department: str
     section: str
     year: int
     hackerrank_username: str
+
+class StudentCreate(StudentBase):
+    pass
+
+class Student(StudentBase):
+    id: str # UUID as string
 
 class StudentUpdate(BaseModel):
     roll_no: Optional[str] = None

@@ -59,13 +59,13 @@ $$ LANGUAGE plpgsql;
 
 -- 3. Top Students
 CREATE OR REPLACE FUNCTION get_top_students()
-RETURNS TABLE (name TEXT, total_score BIGINT) AS $$
+RETURNS TABLE (id UUID, name TEXT, total_score BIGINT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT s.name, SUM(l.score) as total_score
+    SELECT s.id, s.name, SUM(l.score) as total_score
     FROM leaderboard l
     JOIN students s ON l.username = s.hackerrank_username
-    GROUP BY s.name
+    GROUP BY s.id, s.name
     ORDER BY total_score DESC
     LIMIT 10;
 END;
@@ -83,5 +83,38 @@ BEGIN
         FROM leaderboard l
         WHERE l.contest_name = p_contest_name
     );
+END;
+$$ LANGUAGE plpgsql;
+
+-- 5. All Raw Data for Frontend with Rank
+CREATE OR REPLACE FUNCTION get_all_raw_data()
+RETURNS TABLE (
+    student_id UUID,
+    name TEXT,
+    username TEXT,
+    department TEXT,
+    section TEXT,
+    year INT,
+    contest_name TEXT,
+    score INT,
+    time_taken INT,
+    rank BIGINT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        s.id as student_id,
+        s.name,
+        s.hackerrank_username as username,
+        s.department,
+        s.section,
+        s.year,
+        l.contest_name,
+        l.score,
+        l.time_taken,
+        RANK() OVER (PARTITION BY l.contest_name ORDER BY l.score DESC, l.time_taken ASC) as rank
+    FROM leaderboard l
+    JOIN students s ON l.username = s.hackerrank_username
+    ORDER BY l.contest_name, rank;
 END;
 $$ LANGUAGE plpgsql;
