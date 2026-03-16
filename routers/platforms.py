@@ -4,8 +4,29 @@ from schemas import StudentPlatform
 from typing import List
 import csv
 import io
+import re
 
 router = APIRouter(tags=["Platforms"])
+
+def clean_leetcode_username(raw_id: str) -> str:
+    """
+    Cleans a raw LeetCode ID by removing URLs, suffixes like '(new)', and trailing slashes.
+    """
+    if not raw_id or not isinstance(raw_id, str):
+        return raw_id
+    
+    # Remove trailing slashes and common URL prefixes
+    raw_id = raw_id.strip().rstrip('/')
+    if '/' in raw_id:
+        raw_id = raw_id.split('/')[-1]
+    
+    # Remove common suffixes like (new)
+    raw_id = raw_id.replace('(new)', '')
+    
+    # Remove non-alphanumeric trailing characters
+    raw_id = re.sub(r'[^a-zA-Z0-9_-].*$', '', raw_id)
+    
+    return raw_id.strip()
 
 @router.post("/platforms/bulk")
 def add_platforms_bulk(platforms: List[StudentPlatform]):
@@ -13,7 +34,12 @@ def add_platforms_bulk(platforms: List[StudentPlatform]):
     Store multiple student platform IDs via JSON array.
     """
     try:
-        data = [p.model_dump() for p in platforms]
+        data = []
+        for p in platforms:
+            item = p.model_dump()
+            if item.get("leetcode_id"):
+                item["leetcode_id"] = clean_leetcode_username(item["leetcode_id"])
+            data.append(item)
         
         # Using upsert to update if roll_no exists
         response = supabase.table("student_platforms").upsert(data).execute()
@@ -47,10 +73,14 @@ async def add_platforms_csv(file: UploadFile = File(...)):
             
             if "roll_no" not in cleaned_row:
                 raise HTTPException(status_code=400, detail="CSV must contain 'roll_no' column")
+            
+            leetcode_id = cleaned_row.get("leetcode_id")
+            if leetcode_id:
+                leetcode_id = clean_leetcode_username(leetcode_id)
                 
             platform_data.append({
                 "roll_no": cleaned_row["roll_no"],
-                "leetcode_id": cleaned_row.get("leetcode_id"),
+                "leetcode_id": leetcode_id,
                 "codechef_id": cleaned_row.get("codechef_id"),
                 "codeforces_id": cleaned_row.get("codeforces_id")
             })
