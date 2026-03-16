@@ -55,3 +55,8 @@ class LeetCodeStats(BaseModel):
     easy_today: Optional[int] = 0
     medium_today: Optional[int] = 0
     hard_today: Optional[int] = 0
+
+class StudentPlatformUpdate(BaseModel):
+    leetcode_id: Optional[str] = None
+    codeforces_id: Optional[str] = None
+    codechef_id: Optional[str] = None

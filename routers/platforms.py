@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from database import supabase
-from schemas import StudentPlatform
+from schemas import StudentPlatform, StudentPlatformUpdate
 from typing import List
 import csv
 import io
@@ -109,3 +109,48 @@ def get_all_platforms():
         return response.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/platforms")
+def add_platform_entry(platform_data: StudentPlatform):
+    """
+    Adds platform IDs for a single student, verifying the student exists first.
+    """
+    try:
+        # 1. Verify student exists
+        student_resp = supabase.table("students").select("roll_no").eq("roll_no", platform_data.roll_no).execute()
+        if not student_resp.data:
+            raise HTTPException(status_code=404, detail=f"Student with roll_no {platform_data.roll_no} not found.")
+
+        # 2. Clean and upsert data
+        data = platform_data.model_dump()
+        if data.get("leetcode_id"):
+            data["leetcode_id"] = clean_leetcode_username(data["leetcode_id"])
+
+        response = supabase.table("student_platforms").upsert(data).execute()
+        
+        return {"message": "Platform IDs added successfully", "data": response.data[0]}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to add platform IDs: {str(e)}")
+
+@router.patch("/platforms/{roll_no}")
+def update_platform_entry(roll_no: str, platform_update: StudentPlatformUpdate):
+    """
+    Updates one or more platform IDs for an existing student.
+    """
+    try:
+        update_data = platform_update.model_dump(exclude_unset=True)
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No fields provided for update.")
+
+        # Clean LeetCode ID if present
+        if "leetcode_id" in update_data:
+            update_data["leetcode_id"] = clean_leetcode_username(update_data["leetcode_id"])
+
+        response = supabase.table("student_platforms").update(update_data).eq("roll_no", roll_no).execute()
+
+        if not response.data:
+            raise HTTPException(status_code=404, detail=f"Student with roll_no {roll_no} not found in platform table.")
+
+        return {"message": "Platform IDs updated successfully", "data": response.data[0]}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Update failed: {str(e)}")

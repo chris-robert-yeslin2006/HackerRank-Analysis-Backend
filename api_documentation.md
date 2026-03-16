@@ -362,11 +362,36 @@ Retrieve all stored platform IDs.
   ]
   ```
 
+### 17. Add Platform IDs (Single Student)
+Adds or updates platform IDs for a single student. The student must already exist in the main `students` table.
+- **Method**: `POST`
+- **Endpoint**: `/platforms`
+- **Body**:
+  ```json
+  {
+    "roll_no": "21CS001",
+    "leetcode_id": "arjun_new_lc"
+  }
+  ```
+- **Response**: `200 OK`
+
+### 18. Update Platform IDs (Single Student)
+Updates one or more platform IDs for a student who already has an entry in the `student_platforms` table.
+- **Method**: `PATCH`
+- **Endpoint**: `/platforms/{roll_no}`
+- **Body**:
+  ```json
+  {
+    "codeforces_id": "arjun_new_cf"
+  }
+  ```
+- **Response**: `200 OK`
+
 ---
 
 ## Platform & LeetCode Analytics
 
-### 17. Platform Department Leaderboard
+### 19. Platform Department Leaderboard
 Aggregated total scores grouped by department for a specific platform.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/department?platform={platform}`

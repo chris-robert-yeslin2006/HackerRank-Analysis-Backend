@@ -115,7 +115,7 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
                         hard_solved = s["count"]
 
             # Fetch existing stats to calculate "today" delta
-            existing_resp = supabase.table("leetcode_stats").select("*").eq("roll_no", student["roll_no"]).execute()
+            existing_resp = supabase.table("leetcode_stats").select("easy_solved, medium_solved, hard_solved, easy_today, medium_today, hard_today, updated_at").eq("roll_no", student["roll_no"]).execute()
             
             easy_today = 0
             medium_today = 0
@@ -123,30 +123,36 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
             
             if existing_resp.data:
                 old_stats = existing_resp.data[0]
-                last_updated = old_stats.get("updated_at")
+                last_updated_str = old_stats.get("updated_at")
                 
-                now = datetime.now(timezone.utc)
+                # Calculate delta from last sync
+                delta_easy = max(0, easy_solved - old_stats.get("easy_solved", 0))
+                delta_medium = max(0, medium_solved - old_stats.get("medium_solved", 0))
+                delta_hard = max(0, hard_solved - old_stats.get("hard_solved", 0))
+
+                # Check if the last update was on the same day (UTC)
+                now_utc = datetime.now(timezone.utc)
                 is_same_day = False
-                
-                if last_updated:
-                    last_dt = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
-                    if last_dt.date() == now.date():
+                if last_updated_str:
+                    last_updated_dt = datetime.fromisoformat(last_updated_str.replace('Z', '+00:00'))
+                    if last_updated_dt.date() == now_utc.date():
                         is_same_day = True
                 
                 if is_same_day:
-                    # Same day: add delta since last sync to existing today's count
-                    delta_easy = max(0, easy_solved - old_stats.get("easy_solved", 0))
-                    delta_medium = max(0, medium_solved - old_stats.get("medium_solved", 0))
-                    delta_hard = max(0, hard_solved - old_stats.get("hard_solved", 0))
-                    
+                    # If same day, add the new delta to the existing "today" count
                     easy_today = old_stats.get("easy_today", 0) + delta_easy
                     medium_today = old_stats.get("medium_today", 0) + delta_medium
                     hard_today = old_stats.get("hard_today", 0) + delta_hard
                 else:
-                    # New day: today's count starts as the delta since the last recorded overall total
-                    easy_today = max(0, easy_solved - old_stats.get("easy_solved", 0))
-                    medium_today = max(0, medium_solved - old_stats.get("medium_solved", 0))
-                    hard_today = max(0, hard_solved - old_stats.get("hard_solved", 0))
+                    # If new day, the delta itself becomes the new "today" count
+                    easy_today = delta_easy
+                    medium_today = delta_medium
+                    hard_today = delta_hard
+            else:
+                # No previous record, so today's count is the total count
+                easy_today = easy_solved
+                medium_today = medium_solved
+                hard_today = hard_solved
             
             # Extract rating
             rating = None
