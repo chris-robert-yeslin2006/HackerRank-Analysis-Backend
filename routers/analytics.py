@@ -20,6 +20,20 @@ def get_leetcode_analytics():
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error fetching LeetCode analytics: {str(e)}")
 
+@router.get("/analytics/leetcode/absent/{contest_type}")
+def get_leetcode_absent_students(contest_type: str):
+    """
+    Returns students who did not participate in a LeetCode contest (weekly or biweekly).
+    """
+    if contest_type.lower() not in ["weekly", "biweekly"]:
+        raise HTTPException(status_code=400, detail="contest_type must be 'weekly' or 'biweekly'")
+        
+    try:
+        response = supabase.rpc("get_leetcode_absent_students", {"p_contest_type": contest_type.lower()}).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching LeetCode absent students: {str(e)}")
+
 @router.get("/analytics/section")
 def get_section_leaderboard():
     try:

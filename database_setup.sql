@@ -184,6 +184,49 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- 12. RPC — Get Students who did NOT participate in LeetCode Contest
+CREATE OR REPLACE FUNCTION get_leetcode_absent_students(p_contest_type TEXT)
+RETURNS TABLE (
+    roll_no TEXT,
+    name TEXT,
+    leetcode_id TEXT,
+    department TEXT,
+    section TEXT,
+    year INT
+) AS $$
+BEGIN
+    IF p_contest_type = 'weekly' THEN
+        RETURN QUERY
+        SELECT 
+            s.roll_no,
+            s.name,
+            sp.leetcode_id,
+            s.department,
+            s.section,
+            s.year
+        FROM students s
+        JOIN student_platforms sp ON s.roll_no = sp.roll_no
+        LEFT JOIN leetcode_stats l ON s.roll_no = l.roll_no
+        WHERE sp.leetcode_id IS NOT NULL 
+          AND (l.weekly_rank IS NULL OR l.roll_no IS NULL);
+    ELSIF p_contest_type = 'biweekly' THEN
+        RETURN QUERY
+        SELECT 
+            s.roll_no,
+            s.name,
+            sp.leetcode_id,
+            s.department,
+            s.section,
+            s.year
+        FROM students s
+        JOIN student_platforms sp ON s.roll_no = sp.roll_no
+        LEFT JOIN leetcode_stats l ON s.roll_no = l.roll_no
+        WHERE sp.leetcode_id IS NOT NULL 
+          AND (l.biweekly_rank IS NULL OR l.roll_no IS NULL);
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
 -- 2. Section leaderboard
 CREATE OR REPLACE FUNCTION get_section_leaderboard()
 RETURNS TABLE (section TEXT, total_score BIGINT) AS $$

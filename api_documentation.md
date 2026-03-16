@@ -409,7 +409,26 @@ Returns detailed LeetCode stats for all students.
   ]
   ```
 
-### 19. Sync LeetCode Stats
+### 19. LeetCode Absent Students
+Returns students who did NOT participate in a LeetCode contest (weekly or biweekly).
+- **Method**: `GET`
+- **Endpoint**: `/analytics/leetcode/absent/{contest_type}`
+- **Parameters**: `contest_type` ('weekly' or 'biweekly')
+- **Response**: `200 OK`
+  ```json
+  [
+    {
+      "roll_no": "21CS001",
+      "name": "Arjun Kumar",
+      "leetcode_id": "arjun_lc",
+      "department": "CSE",
+      "section": "A",
+      "year": 1
+    }
+  ]
+  ```
+
+### 20. Sync LeetCode Stats
 Manually trigger a sync from LeetCode GraphQL API for all students who have a `leetcode_id`.
 - **Method**: `POST`
 - **Endpoint**: `/sync/leetcode`
