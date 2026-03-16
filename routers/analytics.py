@@ -4,13 +4,21 @@ from database import supabase
 router = APIRouter(tags=["Analytics"])
 
 @router.get("/analytics/department")
-def get_department_leaderboard():
+def get_department_leaderboard(platform: str = "hackerrank"):
     try:
-        # Calling the RPC function deployed on Supabase
-        response = supabase.rpc("get_department_leaderboard").execute()
+        # Calling the RPC function with platform parameter
+        response = supabase.rpc("get_platform_department_leaderboard", {"p_platform": platform.lower()}).execute()
         return response.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error fetching data. Did you run the RPC SQL in Supabase? Error: {str(e)}")
+
+@router.get("/analytics/leetcode")
+def get_leetcode_analytics():
+    try:
+        response = supabase.rpc("get_leetcode_analytics").execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching LeetCode analytics: {str(e)}")
 
 @router.get("/analytics/section")
 def get_section_leaderboard():

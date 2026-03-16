@@ -34,3 +34,18 @@ class LeaderboardEntryCreate(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+class StudentPlatform(BaseModel):
+    roll_no: str
+    leetcode_id: Optional[str] = None
+    codeforces_id: Optional[str] = None
+    codechef_id: Optional[str] = None
+
+class LeetCodeStats(BaseModel):
+    roll_no: str
+    weekly_rank: Optional[int] = None
+    weekly_problems_solved: Optional[int] = None
+    biweekly_rank: Optional[int] = None
+    biweekly_problems_solved: Optional[int] = None
+    contest_rating: Optional[int] = None
+    total_problems_solved: Optional[int] = None
