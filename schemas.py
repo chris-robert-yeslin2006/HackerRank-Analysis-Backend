@@ -49,3 +49,9 @@ class LeetCodeStats(BaseModel):
     biweekly_problems_solved: Optional[int] = None
     contest_rating: Optional[int] = None
     total_problems_solved: Optional[int] = None
+    easy_solved: Optional[int] = 0
+    medium_solved: Optional[int] = 0
+    hard_solved: Optional[int] = 0
+    easy_today: Optional[int] = 0
+    medium_today: Optional[int] = 0
+    hard_today: Optional[int] = 0

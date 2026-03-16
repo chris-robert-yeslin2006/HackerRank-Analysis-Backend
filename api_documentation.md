@@ -387,7 +387,7 @@ Aggregated total scores grouped by department for a specific platform.
   ```
 
 ### 18. LeetCode Analytics
-Returns detailed LeetCode stats for all students.
+Returns detailed LeetCode stats for all students, including difficulty breakdown and daily activity.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/leetcode`
 - **Response**: `200 OK`
@@ -404,7 +404,13 @@ Returns detailed LeetCode stats for all students.
       "biweekly_rank": 2000,
       "biweekly_problems_solved": 2,
       "contest_rating": 1650,
-      "total_problems_solved": 450
+      "total_problems_solved": 450,
+      "easy_solved": 200,
+      "medium_solved": 200,
+      "hard_solved": 50,
+      "easy_today": 2,
+      "medium_today": 1,
+      "hard_today": 0
     }
   ]
   ```

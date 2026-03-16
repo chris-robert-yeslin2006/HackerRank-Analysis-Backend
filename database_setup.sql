@@ -105,6 +105,12 @@ CREATE TABLE leetcode_stats (
     biweekly_problems_solved INT,
     contest_rating INT,
     total_problems_solved INT,
+    easy_solved INT DEFAULT 0,
+    medium_solved INT DEFAULT 0,
+    hard_solved INT DEFAULT 0,
+    easy_today INT DEFAULT 0,
+    medium_today INT DEFAULT 0,
+    hard_today INT DEFAULT 0,
     updated_at TIMESTAMP DEFAULT NOW(),
     FOREIGN KEY (roll_no) REFERENCES students(roll_no) ON DELETE CASCADE
 );
@@ -145,7 +151,13 @@ RETURNS TABLE (
     biweekly_rank INT,
     biweekly_problems_solved INT,
     contest_rating INT,
-    total_problems_solved INT
+    total_problems_solved INT,
+    easy_solved INT,
+    medium_solved INT,
+    hard_solved INT,
+    easy_today INT,
+    medium_today INT,
+    hard_today INT
 ) AS $$
 BEGIN
     RETURN QUERY
@@ -160,7 +172,13 @@ BEGIN
         l.biweekly_rank,
         l.biweekly_problems_solved,
         l.contest_rating,
-        l.total_problems_solved
+        l.total_problems_solved,
+        l.easy_solved,
+        l.medium_solved,
+        l.hard_solved,
+        l.easy_today,
+        l.medium_today,
+        l.hard_today
     FROM students s
     JOIN leetcode_stats l ON s.roll_no = l.roll_no;
 END;

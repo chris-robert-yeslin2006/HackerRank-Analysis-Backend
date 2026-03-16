@@ -4,6 +4,7 @@ import re
 from fastapi import APIRouter, HTTPException
 from database import supabase
 from typing import Dict, Any
+from datetime import datetime, timezone
 
 router = APIRouter(tags=["Sync"])
 
@@ -95,11 +96,58 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
 
             data = res_data["data"]
 
-            # Extract total solved
+            # Extract total solved by difficulty
             total_solved = 0
+            easy_solved = 0
+            medium_solved = 0
+            hard_solved = 0
+            
             if data["matchedUser"] and data["matchedUser"]["submitStats"]:
-                total_solved = data["matchedUser"]["submitStats"]["acSubmissionNum"][0]["count"]
+                stats = data["matchedUser"]["submitStats"]["acSubmissionNum"]
+                for s in stats:
+                    if s["difficulty"] == "All":
+                        total_solved = s["count"]
+                    elif s["difficulty"] == "Easy":
+                        easy_solved = s["count"]
+                    elif s["difficulty"] == "Medium":
+                        medium_solved = s["count"]
+                    elif s["difficulty"] == "Hard":
+                        hard_solved = s["count"]
 
+            # Fetch existing stats to calculate "today" delta
+            existing_resp = supabase.table("leetcode_stats").select("*").eq("roll_no", student["roll_no"]).execute()
+            
+            easy_today = 0
+            medium_today = 0
+            hard_today = 0
+            
+            if existing_resp.data:
+                old_stats = existing_resp.data[0]
+                last_updated = old_stats.get("updated_at")
+                
+                now = datetime.now(timezone.utc)
+                is_same_day = False
+                
+                if last_updated:
+                    last_dt = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
+                    if last_dt.date() == now.date():
+                        is_same_day = True
+                
+                if is_same_day:
+                    # Same day: add delta since last sync to existing today's count
+                    delta_easy = max(0, easy_solved - old_stats.get("easy_solved", 0))
+                    delta_medium = max(0, medium_solved - old_stats.get("medium_solved", 0))
+                    delta_hard = max(0, hard_solved - old_stats.get("hard_solved", 0))
+                    
+                    easy_today = old_stats.get("easy_today", 0) + delta_easy
+                    medium_today = old_stats.get("medium_today", 0) + delta_medium
+                    hard_today = old_stats.get("hard_today", 0) + delta_hard
+                else:
+                    # New day: today's count starts as the delta since the last recorded overall total
+                    easy_today = max(0, easy_solved - old_stats.get("easy_solved", 0))
+                    medium_today = max(0, medium_solved - old_stats.get("medium_solved", 0))
+                    hard_today = max(0, hard_solved - old_stats.get("hard_solved", 0))
+            
             # Extract rating
             rating = None
             if data["userContestRanking"]:
@@ -139,6 +187,12 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
                 "biweekly_problems_solved": biweekly_solved,
                 "contest_rating": rating,
                 "total_problems_solved": total_solved,
+                "easy_solved": easy_solved,
+                "medium_solved": medium_solved,
+                "hard_solved": hard_solved,
+                "easy_today": easy_today,
+                "medium_today": medium_today,
+                "hard_today": hard_today,
                 "updated_at": "now()"
             }).execute()
 
