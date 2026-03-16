@@ -304,9 +304,69 @@ Returns all students who did NOT participate in a given `contest_name`.
 
 ---
 
+## Platform Management
+
+### 14. Bulk Upload Platform IDs (JSON)
+Store multiple student platform IDs via JSON array.
+- **Method**: `POST`
+- **Endpoint**: `/platforms/bulk`
+- **Body**: 
+  ```json
+  [
+    {
+      "roll_no": "21CS001",
+      "leetcode_id": "arjun_lc",
+      "codeforces_id": "arjun_cf",
+      "codechef_id": "arjun_cc"
+    }
+  ]
+  ```
+- **Response**: `200 OK`
+  ```json
+  {
+    "message": "Platform IDs stored successfully",
+    "count": 1,
+    "data": [ ... ]
+  }
+  ```
+
+### 15. Bulk Upload Platform IDs (CSV)
+Store student platform IDs via CSV file.
+- **Method**: `POST`
+- **Endpoint**: `/platforms/csv`
+- **Body**: `multipart/form-data`
+  - `file`: The `.csv` file containing headers: `roll_no`, `leetcode_id`, `codechef_id`, `codeforces_id`.
+- **Response**: `200 OK`
+  ```json
+  {
+    "message": "CSV data stored successfully",
+    "count": 25,
+    "data": [ ... ]
+  }
+  ```
+
+### 16. Get All Platforms
+Retrieve all stored platform IDs.
+- **Method**: `GET`
+- **Endpoint**: `/platforms`
+- **Response**: `200 OK`
+  ```json
+  [
+    {
+      "roll_no": "21CS001",
+      "leetcode_id": "arjun_lc",
+      "codeforces_id": "arjun_cf",
+      "codechef_id": "arjun_cc",
+      "created_at": "2023-10-01T12:00:00Z"
+    }
+  ]
+  ```
+
+---
+
 ## Platform & LeetCode Analytics
 
-### 14. Platform Department Leaderboard
+### 17. Platform Department Leaderboard
 Aggregated total scores grouped by department for a specific platform.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/department?platform={platform}`
@@ -326,7 +386,7 @@ Aggregated total scores grouped by department for a specific platform.
   ]
   ```
 
-### 15. LeetCode Analytics
+### 18. LeetCode Analytics
 Returns detailed LeetCode stats for all students.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/leetcode`
@@ -349,7 +409,7 @@ Returns detailed LeetCode stats for all students.
   ]
   ```
 
-### 16. Sync LeetCode Stats
+### 19. Sync LeetCode Stats
 Manually trigger a sync from LeetCode GraphQL API for all students who have a `leetcode_id`.
 - **Method**: `POST`
 - **Endpoint**: `/sync/leetcode`
@@ -364,7 +424,7 @@ Manually trigger a sync from LeetCode GraphQL API for all students who have a `l
 
 ## Utility Endpoints
 
-### 17. Welcome Message
+### 20. Welcome Message
 The root endpoint of the API.
 - **Method**: `GET`
 - **Endpoint**: `/`
@@ -375,7 +435,7 @@ The root endpoint of the API.
   }
   ```
 
-### 18. Health Check
+### 21. Health Check
 Check the server status and Supabase connection.
 - **Method**: `GET`
 - **Endpoint**: `/health`
