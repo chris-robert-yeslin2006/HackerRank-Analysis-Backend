@@ -288,70 +288,105 @@ async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, An
         return
 
     async with semaphore:
-        try:
-            await asyncio.sleep(1.5)  # Rate limiting - 2s between requests
+        max_retries = 3
+        base_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                await asyncio.sleep(2)  # Rate limiting - 2s between requests
 
-            user_info = await fetch_codeforces_user_info(client, username)
-            if not user_info:
-                print(f"User {username} not found on Codeforces")
-                return
+                user_info = await fetch_codeforces_user_info(client, username)
+                if not user_info:
+                    print(f"User {username} not found on Codeforces")
+                    return
+                
+                if not user_info.get("rating"):
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        print(f"⏳ Rate limited for {username}, retrying in {delay}s...")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        print(f"❌ Rate limit exceeded for {username}")
+                        return
 
-            rating_history = await fetch_codeforces_rating(client, username)
-            submissions = await fetch_codeforces_submissions(client, username)
+                rating_history = await fetch_codeforces_rating(client, username)
+                submissions = await fetch_codeforces_submissions(client, username)
+                break  # Success
+                
+            except Exception as e:
+                if "429" in str(e) and attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    print(f"⏳ Rate limited for {username}, retrying in {delay}s...")
+                    await asyncio.sleep(delay)
+                else:
+                    print(f"Error fetching Codeforces data for {username}: {str(e)}")
+                    return
 
-            current_rating = user_info.get("rating")
-            max_rating = user_info.get("maxRating")
-            rank = user_info.get("rank")
-            contribution = user_info.get("contribution", 0)
+                current_rating = user_info.get("rating")
+                max_rating = user_info.get("maxRating")
+                rank = user_info.get("rank")
+                contribution = user_info.get("contribution", 0)
 
-            easy_solved = set()
-            medium_solved = set()
-            hard_solved = set()
+                easy_solved = set()
+                medium_solved = set()
+                hard_solved = set()
 
-            for sub in submissions:
-                if sub.get("verdict") == "OK":
-                    prob = sub.get("problem", {})
-                    tags = prob.get("tags", [])
-                    idx = prob.get("index", "")
-                    if idx.startswith("1"):
-                        easy_solved.add(prob.get("name"))
-                    elif idx.startswith("2"):
-                        medium_solved.add(prob.get("name"))
-                    elif idx.startswith("3"):
-                        hard_solved.add(prob.get("name"))
+                for sub in submissions:
+                    if sub.get("verdict") == "OK":
+                        prob = sub.get("problem", {})
+                        idx = prob.get("index", "")
+                        if idx.startswith("1"):
+                            easy_solved.add(prob.get("name"))
+                        elif idx.startswith("2"):
+                            medium_solved.add(prob.get("name"))
+                        elif idx.startswith("3"):
+                            hard_solved.add(prob.get("name"))
 
-            total_contests = len(rating_history)
-            last_rating_change = 0
-            contest_name = None
-            
-            if total_contests >= 1:
-                last_contest = rating_history[-1]
-                contest_name = last_contest.get("contestName", None)
-                if total_contests >= 2:
-                    last_rating_change = rating_history[-1].get("newRating", 0) - rating_history[-2].get("newRating", 0)
-                elif total_contests == 1:
-                    last_rating_change = rating_history[0].get("newRating", 0) - rating_history[0].get("oldRating", 0)
+                total_contests = len(rating_history)
+                contest_name = None
+                rating_changes = []
+                
+                if total_contests >= 1:
+                    last_contest = rating_history[-1]
+                    contest_name = last_contest.get("contestName", None)
+                    
+                    last_five = rating_history[-5:] if total_contests >= 5 else rating_history
+                    rating_changes = [
+                        {
+                            "contest": c.get("contestName", ""),
+                            "rating": c.get("newRating", 0),
+                            "change": c.get("newRating", 0) - c.get("oldRating", 0) if c.get("oldRating") else 0
+                        }
+                        for c in last_five
+                    ]
 
-            supabase.table("codeforces_stats").upsert({
-                "roll_no": student["roll_no"],
-                "current_rating": current_rating,
-                "max_rating": max_rating,
-                "rank": rank,
-                "contribution": contribution,
-                "problems_solved": len(easy_solved) + len(medium_solved) + len(hard_solved),
-                "easy_solved": len(easy_solved),
-                "medium_solved": len(medium_solved),
-                "hard_solved": len(hard_solved),
-                "total_contests": total_contests,
-                "last_contest_rating_change": last_rating_change,
-                "contest_name": contest_name,
-                "updated_at": "now()"
-            }).execute()
+                supabase.table("codeforces_stats").upsert({
+                    "roll_no": student["roll_no"],
+                    "current_rating": current_rating,
+                    "max_rating": max_rating,
+                    "rank": rank,
+                    "contribution": contribution,
+                    "problems_solved": len(easy_solved) + len(medium_solved) + len(hard_solved),
+                    "easy_solved": len(easy_solved),
+                    "medium_solved": len(medium_solved),
+                    "hard_solved": len(hard_solved),
+                    "total_contests": total_contests,
+                    "contest_name": contest_name,
+                    "rating_changes": rating_changes,
+                    "updated_at": "now()"
+                }).execute()
 
-            print(f"✅ Updated Codeforces: {student.get('roll_no')} - Rating: {current_rating}")
-
-        except Exception as e:
-            print(f"Error fetching Codeforces data for {username}: {str(e)}")
+                print(f"✅ Updated Codeforces: {student.get('roll_no')} - Rating: {current_rating}")
+                break  # Success, exit retry loop
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    print(f"⚠️ Error for {username}, retrying in {delay}s: {str(e)}")
+                    await asyncio.sleep(delay)
+                else:
+                    print(f"❌ Error fetching Codeforces data for {username}: {str(e)}")
 
 @router.post("/sync/codeforces")
 async def sync_codeforces():
@@ -362,7 +397,7 @@ async def sync_codeforces():
         if not students:
             return {"message": "No students with Codeforces IDs found"}
 
-        semaphore = asyncio.Semaphore(3)  # Lower concurrency for CF API limits
+        semaphore = asyncio.Semaphore(2)  # Lower concurrency for CF API limits
 
         async with httpx.AsyncClient(timeout=40.0) as client:
             tasks = [fetch_codeforces_data(client, student, semaphore) for student in students]

@@ -334,8 +334,8 @@ CREATE TABLE codeforces_stats (
     medium_solved INT DEFAULT 0,
     hard_solved INT DEFAULT 0,
     total_contests INT DEFAULT 0,
-    last_contest_rating_change INT DEFAULT 0,
     contest_name TEXT,
+    rating_changes JSONB DEFAULT '[]'::jsonb,
     updated_at TIMESTAMP DEFAULT NOW(),
     FOREIGN KEY (roll_no) REFERENCES students(roll_no) ON DELETE CASCADE
 );
