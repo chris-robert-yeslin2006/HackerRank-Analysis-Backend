@@ -1,23 +1,46 @@
 from fastapi import APIRouter, HTTPException
-from database import supabase
-from functools import lru_cache
-from datetime import datetime, timedelta
+from database import supabase, redis_client
+import json
 import time
 
 router = APIRouter(tags=["Analytics"])
 
 _cache = {}
-_cache_ttl = 60  # Cache TTL in seconds
+_cache_ttl = 60
 
 def get_cached(key):
+    # Try Redis first
+    if redis_client:
+        try:
+            data = redis_client.get(f"cache:{key}")
+            if data:
+                print(f"🔵 Redis HIT: {key}")
+                return json.loads(data)
+            print(f"🔴 Redis MISS: {key}")
+        except Exception as e:
+            print(f"⚠️ Redis error: {e}")
+    
+    # Fallback to in-memory
     if key in _cache:
         data, timestamp = _cache[key]
         if time.time() - timestamp < _cache_ttl:
+            print(f"🔵 Memory HIT: {key}")
             return data
     return None
 
 def set_cached(key, value):
+    # Try Redis first
+    if redis_client:
+        try:
+            redis_client.set(f"cache:{key}", json.dumps(value), ex=60)
+            print(f"✅ Redis SET: {key}")
+            return
+        except Exception as e:
+            print(f"⚠️ Redis set error: {e}")
+    
+    # Fallback to in-memory
     _cache[key] = (value, time.time())
+    print(f"✅ Memory SET: {key}")
 
 @router.get("/analytics/department")
 def get_department_leaderboard(platform: str = "hackerrank"):
@@ -66,7 +89,7 @@ def get_platform_department_leaderboard(platform: str = "hackerrank"):
 
 @router.get("/analytics/leetcode")
 def get_leetcode_analytics():
-    cache_key = "leetcode"
+    cache_key = "leetcode_analytics"
     cached = get_cached(cache_key)
     if cached:
         return cached
@@ -81,7 +104,7 @@ def get_leetcode_analytics():
 
 @router.get("/analytics/codeforces")
 def get_codeforces_analytics():
-    cache_key = "codeforces"
+    cache_key = "codeforces_analytics"
     cached = get_cached(cache_key)
     if cached:
         return cached
@@ -96,7 +119,7 @@ def get_codeforces_analytics():
 
 @router.get("/analytics/codechef")
 def get_codechef_analytics():
-    cache_key = "codechef"
+    cache_key = "codechef_analytics"
     cached = get_cached(cache_key)
     if cached:
         return cached
@@ -111,9 +134,6 @@ def get_codechef_analytics():
 
 @router.get("/analytics/codeforces/absent")
 def get_codeforces_absent_students():
-    """
-    Returns students who have Codeforces IDs but no stats (haven't been synced).
-    """
     try:
         response = supabase.rpc("get_students_with_codeforces", {}).execute()
         students = response.data or []
@@ -130,9 +150,6 @@ def get_codeforces_absent_students():
 
 @router.get("/analytics/codechef/absent")
 def get_codechef_absent_students():
-    """
-    Returns students who have CodeChef IDs but no stats (haven't been synced).
-    """
     try:
         response = supabase.rpc("get_students_with_codechef", {}).execute()
         students = response.data or []
@@ -149,9 +166,6 @@ def get_codechef_absent_students():
 
 @router.get("/analytics/leetcode/absent/{contest_type}")
 def get_leetcode_absent_students(contest_type: str):
-    """
-    Returns students who did not participate in a LeetCode contest (weekly or biweekly).
-    """
     if contest_type.lower() not in ["weekly", "biweekly"]:
         raise HTTPException(status_code=400, detail="contest_type must be 'weekly' or 'biweekly'")
         
@@ -163,37 +177,60 @@ def get_leetcode_absent_students(contest_type: str):
 
 @router.get("/analytics/section")
 def get_section_leaderboard():
+    cache_key = "section_leaderboard"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    
     try:
         response = supabase.rpc("get_section_leaderboard", {}).execute()
-        return response.data
+        data = response.data
+        set_cached(cache_key, data)
+        return data
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/analytics/top-students")
 def get_top_students():
+    cache_key = "top_students"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    
     try:
         response = supabase.rpc("get_top_students", {}).execute()
-        return response.data
+        data = response.data
+        set_cached(cache_key, data)
+        return data
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch top students: {str(e)}")
 
 @router.get("/analytics/absent-students/{contest_name}")
 def get_absent_students(contest_name: str):
+    cache_key = f"absent_{contest_name}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    
     try:
         response = supabase.rpc("get_absent_students", {"p_contest_name": contest_name}).execute()
-        return response.data
+        data = response.data
+        set_cached(cache_key, data)
+        return data
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch absent students: {str(e)}")
 
 @router.get("/frontend-data")
 def get_frontend_data():
+    cache_key = "frontend_data"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    
     try:
-        # Get raw joined data with ranks computed in SQL
         response = supabase.rpc("get_all_raw_data", {}).execute()
         raw_data = response.data
 
-        # We will group by an explicit key to build the structure
-        # Key: (year, department, section) -> frontend dictionary
         grouped_data = {}
 
         for row in raw_data:
@@ -218,15 +255,17 @@ def get_frontend_data():
                 
             username = row.get("username")
             grouped_data[group_key]["contests"][contest_name][username] = {
-                "id": row.get("student_id"), # Added student UUID
+                "id": row.get("student_id"),
                 "name": row.get("name"),
                 "user-id": username,
                 "score": row.get("score"),
                 "time": str(row.get("time_taken")),
                 "rank": row.get("rank")
             }
-            
-        return list(grouped_data.values())
+        
+        data = list(grouped_data.values())
+        set_cached(cache_key, data)
+        return data
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error processing frontend data: {str(e)}")
