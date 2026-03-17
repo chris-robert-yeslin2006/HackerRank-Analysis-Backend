@@ -1,28 +1,56 @@
 from fastapi import APIRouter, HTTPException
 from database import supabase
+from functools import lru_cache
+from datetime import datetime, timedelta
+import time
 
 router = APIRouter(tags=["Analytics"])
 
+_cache = {}
+_cache_ttl = 60  # Cache TTL in seconds
+
+def get_cached(key):
+    if key in _cache:
+        data, timestamp = _cache[key]
+        if time.time() - timestamp < _cache_ttl:
+            return data
+    return None
+
+def set_cached(key, value):
+    _cache[key] = (value, time.time())
+
 @router.get("/analytics/department")
 def get_department_leaderboard(platform: str = "hackerrank"):
+    cache_key = f"dept_{platform}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    
     try:
         if platform.lower() == "leetcode":
             response = supabase.rpc("get_leetcode_analytics", {}).execute()
-            return response.data
+            data = response.data
         elif platform.lower() == "codeforces":
             response = supabase.rpc("get_codeforces_analytics", {}).execute()
-            return response.data
+            data = response.data
         elif platform.lower() == "codechef":
             response = supabase.rpc("get_codechef_analytics", {}).execute()
-            return response.data
+            data = response.data
         else:
             response = supabase.rpc("get_platform_department_leaderboard", {"p_platform": platform.lower()}).execute()
-            return response.data
+            data = response.data
+        set_cached(cache_key, data)
+        return data
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error fetching data. Did you run the RPC SQL in Supabase? Error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error fetching data: {str(e)}")
 
 @router.get("/analytics/platform-department")
 def get_platform_department_leaderboard(platform: str = "hackerrank"):
+    cache_key = f"platform_dept_{platform}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    
     try:
         if platform.lower() == "codeforces":
             response = supabase.rpc("get_codeforces_department_leaderboard", {}).execute()
@@ -30,31 +58,54 @@ def get_platform_department_leaderboard(platform: str = "hackerrank"):
             response = supabase.rpc("get_codechef_department_leaderboard", {}).execute()
         else:
             response = supabase.rpc("get_department_leaderboard", {}).execute()
-        return response.data
+        data = response.data
+        set_cached(cache_key, data)
+        return data
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error fetching department leaderboard: {str(e)}")
 
 @router.get("/analytics/leetcode")
 def get_leetcode_analytics():
+    cache_key = "leetcode"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    
     try:
         response = supabase.rpc("get_leetcode_analytics", {}).execute()
-        return response.data
+        data = response.data
+        set_cached(cache_key, data)
+        return data
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error fetching LeetCode analytics: {str(e)}")
 
 @router.get("/analytics/codeforces")
 def get_codeforces_analytics():
+    cache_key = "codeforces"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    
     try:
         response = supabase.rpc("get_codeforces_analytics", {}).execute()
-        return response.data
+        data = response.data
+        set_cached(cache_key, data)
+        return data
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error fetching Codeforces analytics: {str(e)}")
 
 @router.get("/analytics/codechef")
 def get_codechef_analytics():
+    cache_key = "codechef"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    
     try:
         response = supabase.rpc("get_codechef_analytics", {}).execute()
-        return response.data
+        data = response.data
+        set_cached(cache_key, data)
+        return data
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error fetching CodeChef analytics: {str(e)}")
 

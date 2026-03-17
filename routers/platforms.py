@@ -5,8 +5,29 @@ from typing import List
 import csv
 import io
 import re
+import time
 
 router = APIRouter(tags=["Platforms"])
+
+_cache = {}
+_cache_ttl = 30
+
+def get_cached(key):
+    if key in _cache:
+        data, timestamp = _cache[key]
+        if time.time() - timestamp < _cache_ttl:
+            return data
+    return None
+
+def set_cached(key, value):
+    _cache[key] = (value, time.time())
+
+def invalidate_cache(prefix=None):
+    global _cache
+    if prefix:
+        _cache = {k: v for k, v in _cache.items() if not k.startswith(prefix)}
+    else:
+        _cache = {}
 
 def clean_leetcode_username(raw_id: str) -> str:
     """
@@ -101,12 +122,16 @@ async def add_platforms_csv(file: UploadFile = File(...)):
 
 @router.get("/platforms")
 def get_all_platforms():
-    """
-    Retrieve all stored platform IDs.
-    """
+    cache_key = "platforms_all"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    
     try:
         response = supabase.table("student_platforms").select("*").execute()
-        return response.data
+        data = response.data
+        set_cached(cache_key, data)
+        return data
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -127,7 +152,7 @@ def add_platform_entry(platform_data: StudentPlatform):
             data["leetcode_id"] = clean_leetcode_username(data["leetcode_id"])
 
         response = supabase.table("student_platforms").upsert(data).execute()
-        
+        invalidate_cache("platforms")
         return {"message": "Platform IDs added successfully", "data": response.data[0]}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to add platform IDs: {str(e)}")
@@ -150,7 +175,7 @@ def update_platform_entry(roll_no: str, platform_update: StudentPlatformUpdate):
 
         if not response.data:
             raise HTTPException(status_code=404, detail=f"Student with roll_no {roll_no} not found in platform table.")
-
+        invalidate_cache("platforms")
         return {"message": "Platform IDs updated successfully", "data": response.data[0]}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Update failed: {str(e)}")

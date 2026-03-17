@@ -282,6 +282,28 @@ async def fetch_codeforces_contest(client: httpx.AsyncClient, contest_id: int, u
         print(f"Error fetching Codeforces contest {contest_id}: {e}")
     return {}
 
+async def fetch_recent_contests(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
+    """Fetch the last 5 Codeforces contests"""
+    try:
+        r = await client.get(f"{CODEFORCES_API_BASE}/contest.list", params={"from": 1, "count": 5}, headers=CF_HEADERS, timeout=20.0)
+        r.raise_for_status()
+        data = r.json()
+        if data.get("status") == "OK":
+            contests = data.get("result", [])
+            return [{"id": c.get("id"), "name": c.get("name")} for c in reversed(contests)]
+    except Exception as e:
+        print(f"Error fetching recent contests: {e}")
+    return []
+
+# Store globally
+_recent_contests_cache = []
+
+async def get_recent_contests(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
+    global _recent_contests_cache
+    if not _recent_contests_cache:
+        _recent_contests_cache = await fetch_recent_contests(client)
+    return _recent_contests_cache
+
 async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, Any], semaphore: asyncio.Semaphore):
     username = student.get("codeforces_id", "").strip()
     if not username:
@@ -290,7 +312,7 @@ async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, An
 
     async with semaphore:
         try:
-            await asyncio.sleep(1.5)  # Rate limiting between requests
+            await asyncio.sleep(0.3)  # Minimal delay
 
             user_info = await fetch_codeforces_user_info(client, username)
             if not user_info:
@@ -298,45 +320,29 @@ async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, An
                 return
 
             rating_history = await fetch_codeforces_rating(client, username)
-            submissions = await fetch_codeforces_submissions(client, username)
 
             current_rating = user_info.get("rating")
             max_rating = user_info.get("maxRating")
             rank = user_info.get("rank")
             contribution = user_info.get("contribution", 0)
 
-            easy_solved = set()
-            medium_solved = set()
-            hard_solved = set()
-
-            for sub in submissions:
-                if sub.get("verdict") == "OK":
-                    prob = sub.get("problem", {})
-                    idx = prob.get("index", "")
-                    if idx.startswith("1"):
-                        easy_solved.add(prob.get("name"))
-                    elif idx.startswith("2"):
-                        medium_solved.add(prob.get("name"))
-                    elif idx.startswith("3"):
-                        hard_solved.add(prob.get("name"))
-
             total_contests = len(rating_history)
-            contest_name = None
-            rating_changes = []
             
-            if total_contests >= 1:
-                last_contest = rating_history[-1]
-                contest_name = last_contest.get("contestName", None)
-                
-                last_five = rating_history[-5:] if total_contests >= 5 else rating_history
-                rating_changes = [
-                    {
-                        "contest": c.get("contestName", ""),
-                        "rating": c.get("newRating", 0),
-                        "change": c.get("newRating", 0) - c.get("oldRating", 0) if c.get("oldRating") else 0
-                    }
-                    for c in last_five
-                ]
+            recent_contests = await get_recent_contests(client)
+            attended_contests = []
+            
+            for contest in recent_contests:
+                for rating in rating_history:
+                    if rating.get("contestName") == contest["name"]:
+                        attended_contests.append({
+                            "contest": contest["name"],
+                            "rating": rating.get("newRating", 0),
+                            "change": rating.get("newRating", 0) - rating.get("oldRating", 0) if rating.get("oldRating") else 0,
+                            "rank": rating.get("rank", 0)
+                        })
+                        break
+
+            contest_name = attended_contests[0]["contest"] if attended_contests else None
 
             supabase.table("codeforces_stats").upsert({
                 "roll_no": student["roll_no"],
@@ -344,13 +350,9 @@ async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, An
                 "max_rating": max_rating,
                 "rank": rank,
                 "contribution": contribution,
-                "problems_solved": len(easy_solved) + len(medium_solved) + len(hard_solved),
-                "easy_solved": len(easy_solved),
-                "medium_solved": len(medium_solved),
-                "hard_solved": len(hard_solved),
                 "total_contests": total_contests,
                 "contest_name": contest_name,
-                "rating_changes": rating_changes,
+                "rating_changes": attended_contests,
                 "updated_at": "now()"
             }).execute()
 
@@ -362,15 +364,18 @@ async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, An
 @router.post("/sync/codeforces")
 async def sync_codeforces():
     try:
+        global _recent_contests_cache
+        _recent_contests_cache = []  # Clear cache to get fresh contests
+        
         response = supabase.rpc("get_students_with_codeforces",{}).execute()
         students = response.data
 
         if not students:
             return {"message": "No students with Codeforces IDs found"}
 
-        semaphore = asyncio.Semaphore(10)  # Higher concurrency
+        semaphore = asyncio.Semaphore(25)  # High concurrency
 
-        async with httpx.AsyncClient(timeout=40.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             tasks = [fetch_codeforces_data(client, student, semaphore) for student in students]
             await asyncio.gather(*tasks)
 
@@ -391,9 +396,9 @@ async def fetch_codechef_data(client: httpx.AsyncClient, student: Dict[str, Any]
 
     async with semaphore:
         try:
-            await asyncio.sleep(0.8)  # Simple rate limiting
+            await asyncio.sleep(0.3)  # Minimal delay
 
-            r = await client.get(f"{CODECHEF_API_URL}/{username}", timeout=30.0)
+            r = await client.get(f"{CODECHEF_API_URL}/{username}", timeout=20.0)
             
             if r.status_code == 404:
                 print(f"⚠️ CodeChef user not found: {username}")
@@ -470,9 +475,9 @@ async def sync_codechef():
         if not students:
             return {"message": "No students with CodeChef IDs found"}
 
-        semaphore = asyncio.Semaphore(10)  # Higher concurrency
+        semaphore = asyncio.Semaphore(25)  # High concurrency
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=20.0) as client:
             tasks = [fetch_codechef_data(client, student, semaphore) for student in students]
             await asyncio.gather(*tasks)
 

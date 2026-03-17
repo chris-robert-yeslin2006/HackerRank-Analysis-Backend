@@ -5,8 +5,29 @@ from typing import List
 import csv
 import io
 import re
+import time
 
 router = APIRouter(tags=["Students"])
+
+_cache = {}
+_cache_ttl = 30  # Cache TTL in seconds
+
+def get_cached(key):
+    if key in _cache:
+        data, timestamp = _cache[key]
+        if time.time() - timestamp < _cache_ttl:
+            return data
+    return None
+
+def set_cached(key, value):
+    _cache[key] = (value, time.time())
+
+def invalidate_cache(prefix=None):
+    global _cache
+    if prefix:
+        _cache = {k: v for k, v in _cache.items() if not k.startswith(prefix)}
+    else:
+        _cache = {}
 
 def clean_leetcode_username(raw_id: str) -> str:
     if not raw_id or not isinstance(raw_id, str):
@@ -20,10 +41,16 @@ def clean_leetcode_username(raw_id: str) -> str:
 
 @router.get("/students", response_model=List[Student])
 def get_all_students():
+    cache_key = "students_all"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    
     try:
-        # Fetch all students from the database
         response = supabase.table("students").select("*").execute()
-        return response.data
+        data = response.data
+        set_cached(cache_key, data)
+        return data
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch students: {str(e)}")
 
@@ -33,6 +60,7 @@ def add_student(student: StudentCreate):
         response = supabase.table("students").insert(student.model_dump()).execute()
         if not response.data:
             raise HTTPException(status_code=400, detail="Failed to add student")
+        invalidate_cache("students")
         return {"message": "Student added successfully", "data": response.data[0]}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error adding student: {str(e)}")
@@ -76,6 +104,7 @@ async def add_students_bulk(file: UploadFile = File(...)):
             
         # Use upsert to handle existing records if roll_no or username matches
         response = supabase.table("students").upsert(students_data, on_conflict="roll_no").execute()
+        invalidate_cache("students")
         return {"message": "Bulk upload successful", "inserted": len(response.data), "data": response.data}
         
     except Exception as e:
@@ -94,7 +123,7 @@ def update_student(student_id: str, student_update: StudentUpdate):
         
         if not response.data:
             raise HTTPException(status_code=404, detail="Student not found")
-            
+        invalidate_cache("students")
         return {"message": "Student updated successfully", "data": response.data[0]}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
