@@ -61,6 +61,17 @@ class StudentPlatformUpdate(BaseModel):
     codeforces_id: Optional[str] = None
     codechef_id: Optional[str] = None
 
+class StudentFullUpdate(BaseModel):
+    roll_no: str
+    name: Optional[str] = None
+    department: Optional[str] = None
+    section: Optional[str] = None
+    year: Optional[int] = None
+    hackerrank_username: Optional[str] = None
+    leetcode_id: Optional[str] = None
+    codeforces_id: Optional[str] = None
+    codechef_id: Optional[str] = None
+
 class CodeforcesStats(BaseModel):
     roll_no: str
     current_rating: Optional[int] = None

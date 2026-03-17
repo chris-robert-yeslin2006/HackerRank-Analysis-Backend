@@ -136,11 +136,75 @@ Deletes a student by their ID. This only removes the student and does not delete
   }
   ```
 
+### 7. Get Student by Roll Number
+Retrieves a single student by their roll number.
+- **Method**: `GET`
+- **Endpoint**: `/students/roll/{roll_no}`
+- **Example**: `/students/roll/23CS001`
+- **Response**: `200 OK`
+  ```json
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "roll_no": "23CS001",
+    "name": "Jane Doe",
+    "department": "CSE",
+    "section": "A",
+    "year": 1,
+    "hackerrank_username": "jane_hr",
+    "created_at": "2023-10-01T10:00:00Z"
+  }
+  ```
+
+### 8. Full Student Update (PUT)
+Updates both student details and platform IDs in a single call.
+- **Method**: `PUT`
+- **Endpoint**: `/students/full`
+- **Body**:
+  ```json
+  {
+    "roll_no": "23CS001",
+    "name": "Jane Doe Updated",
+    "department": "IT",
+    "section": "B",
+    "year": 2,
+    "hackerrank_username": "jane_new",
+    "leetcode_id": "jane_lc",
+    "codeforces_id": "jane_cf",
+    "codechef_id": "jane_cc"
+  }
+  ```
+- **Response**: `200 OK`
+  ```json
+  {
+    "message": "Student updated successfully",
+    "roll_no": "23CS001"
+  }
+  ```
+
+### 9. Partial Student Update (PATCH)
+Updates one or more fields for student and/or platform IDs.
+- **Method**: `PATCH`
+- **Endpoint**: `/students/full`
+- **Body** (example - only include fields to update):
+  ```json
+  {
+    "roll_no": "23CS001",
+    "leetcode_id": "jane_new_lc"
+  }
+  ```
+- **Response**: `200 OK`
+  ```json
+  {
+    "message": "Student updated successfully",
+    "roll_no": "23CS001"
+  }
+  ```
+
 ---
 
 ## Data Ingestion Endpoints (Leaderboard)
 
-### 7. Add Single Leaderboard Entry
+### 10. Add Single Leaderboard Entry
 Adds a single scraped contest result.
 - **Method**: `POST`
 - **Endpoint**: `/leaderboard`
@@ -170,7 +234,7 @@ Adds a single scraped contest result.
   }
   ```
 
-### 8. Bulk Upload Leaderboard Entries
+### 11. Bulk Upload Leaderboard Entries
 Uploads multiple scraped contest results at once.
 - **Method**: `POST`
 - **Endpoint**: `/leaderboard/bulk`
@@ -206,7 +270,7 @@ Uploads multiple scraped contest results at once.
 
 ## Analytics Endpoints
 
-### 9. Frontend Raw Data
+### 12. Frontend Raw Data
 Returns deeply nested rank and leaderboard info tailored specifically for the frontend display table.
 - **Method**: `GET`
 - **Endpoint**: `/frontend-data`
@@ -233,7 +297,7 @@ Returns deeply nested rank and leaderboard info tailored specifically for the fr
   ]
   ```
 
-### 10. Department Leaderboard
+### 13. Department Leaderboard
 Aggregated total scores grouped by department for HackerRank.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/department`
@@ -251,7 +315,7 @@ Aggregated total scores grouped by department for HackerRank.
   ]
   ```
 
-### 11. Section Leaderboard
+### 14. Section Leaderboard
 Aggregated total scores grouped by section for HackerRank.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/section`
@@ -269,7 +333,7 @@ Aggregated total scores grouped by section for HackerRank.
   ]
   ```
 
-### 12. Top 10 Students
+### 15. Top 10 Students
 Returns the top 10 students across all contests sorted by total score.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/top-students`
@@ -284,7 +348,7 @@ Returns the top 10 students across all contests sorted by total score.
   ]
   ```
 
-### 13. Absent Students for Contest
+### 16. Absent Students for Contest
 Returns all students who did NOT participate in a given `contest_name`.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/absent-students/{contest_name}`
@@ -306,7 +370,7 @@ Returns all students who did NOT participate in a given `contest_name`.
 
 ## Platform Management
 
-### 14. Bulk Upload Platform IDs (JSON)
+### 17. Bulk Upload Platform IDs (JSON)
 Store multiple student platform IDs via JSON array.
 - **Method**: `POST`
 - **Endpoint**: `/platforms/bulk`
@@ -330,7 +394,7 @@ Store multiple student platform IDs via JSON array.
   }
   ```
 
-### 15. Bulk Upload Platform IDs (CSV)
+### 18. Bulk Upload Platform IDs (CSV)
 Store student platform IDs via CSV file.
 - **Method**: `POST`
 - **Endpoint**: `/platforms/csv`
@@ -345,7 +409,7 @@ Store student platform IDs via CSV file.
   }
   ```
 
-### 16. Get All Platforms
+### 19. Get All Platforms
 Retrieve all stored platform IDs.
 - **Method**: `GET`
 - **Endpoint**: `/platforms`
@@ -362,7 +426,7 @@ Retrieve all stored platform IDs.
   ]
   ```
 
-### 17. Add Platform IDs (Single Student)
+### 20. Add Platform IDs (Single Student)
 Adds or updates platform IDs for a single student. The student must already exist in the main `students` table.
 - **Method**: `POST`
 - **Endpoint**: `/platforms`
@@ -375,7 +439,7 @@ Adds or updates platform IDs for a single student. The student must already exis
   ```
 - **Response**: `200 OK`
 
-### 18. Update Platform IDs (Single Student)
+### 21. Update Platform IDs (Single Student)
 Updates one or more platform IDs for a student who already has an entry in the `student_platforms` table.
 - **Method**: `PATCH`
 - **Endpoint**: `/platforms/{roll_no}`
@@ -391,7 +455,7 @@ Updates one or more platform IDs for a student who already has an entry in the `
 
 ## Platform & LeetCode Analytics
 
-### 19. Platform Department Leaderboard
+### 22. Platform Department Leaderboard
 Aggregated total scores grouped by department for a specific platform.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/department?platform={platform}`
@@ -411,7 +475,7 @@ Aggregated total scores grouped by department for a specific platform.
   ]
   ```
 
-### 20. Platform-Specific Department Leaderboard
+### 23. Platform-Specific Department Leaderboard
 Returns aggregated ratings by department for Codeforces or CodeChef.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/platform-department?platform={platform}`
@@ -431,7 +495,7 @@ Returns aggregated ratings by department for Codeforces or CodeChef.
   ]
   ```
 
-### 21. LeetCode Analytics
+### 24. LeetCode Analytics
 Returns detailed LeetCode stats for all students, including difficulty breakdown and daily activity.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/leetcode`
@@ -460,7 +524,7 @@ Returns detailed LeetCode stats for all students, including difficulty breakdown
   ]
   ```
 
-### 19. LeetCode Absent Students
+### 25. LeetCode Absent Students
 Returns students who did NOT participate in a LeetCode contest (weekly or biweekly).
 - **Method**: `GET`
 - **Endpoint**: `/analytics/leetcode/absent/{contest_type}`
@@ -479,7 +543,7 @@ Returns students who did NOT participate in a LeetCode contest (weekly or biweek
   ]
   ```
 
-### 20. Sync LeetCode Stats
+### 26. Sync LeetCode Stats
 Manually trigger a sync from LeetCode GraphQL API for all students who have a `leetcode_id`.
 - **Method**: `POST`
 - **Endpoint**: `/sync/leetcode`
@@ -494,7 +558,7 @@ Manually trigger a sync from LeetCode GraphQL API for all students who have a `l
 
 ## Platform & Codeforces Analytics
 
-### 21. Codeforces Analytics
+### 27. Codeforces Analytics
 Returns detailed Codeforces stats for all students including rating, rank, and problems solved by difficulty.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/codeforces`
@@ -520,7 +584,7 @@ Returns detailed Codeforces stats for all students including rating, rank, and p
   ]
   ```
 
-### 22. Codeforces Absent Students
+### 28. Codeforces Absent Students
 Returns students who have a `codeforces_id` but haven't been synced yet.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/codeforces/absent`
@@ -535,7 +599,7 @@ Returns students who have a `codeforces_id` but haven't been synced yet.
   ]
   ```
 
-### 23. Sync Codeforces Stats
+### 29. Sync Codeforces Stats
 Manually trigger a sync from Codeforces API for all students who have a `codeforces_id`.
 - **Method**: `POST`
 - **Endpoint**: `/sync/codeforces`
@@ -550,7 +614,7 @@ Manually trigger a sync from Codeforces API for all students who have a `codefor
 
 ## Platform & CodeChef Analytics
 
-### 24. CodeChef Analytics
+### 30. CodeChef Analytics
 Returns detailed CodeChef stats for all students including rating, stars, and contest participation.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/codechef`
@@ -574,7 +638,7 @@ Returns detailed CodeChef stats for all students including rating, stars, and co
   ]
   ```
 
-### 25. CodeChef Absent Students
+### 31. CodeChef Absent Students
 Returns students who have a `codechef_id` but haven't been synced yet.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/codechef/absent`
@@ -589,7 +653,7 @@ Returns students who have a `codechef_id` but haven't been synced yet.
   ]
   ```
 
-### 26. Sync CodeChef Stats
+### 32. Sync CodeChef Stats
 Manually trigger a sync from CodeChef API for all students who have a `codechef_id`.
 - **Method**: `POST`
 - **Endpoint**: `/sync/codechef`
@@ -604,7 +668,7 @@ Manually trigger a sync from CodeChef API for all students who have a `codechef_
 
 ## Utility Endpoints
 
-### 20. Welcome Message
+### 33. Welcome Message
 The root endpoint of the API.
 - **Method**: `GET`
 - **Endpoint**: `/`
@@ -615,7 +679,7 @@ The root endpoint of the API.
   }
   ```
 
-### 21. Health Check
+### 34. Health Check
 Check the server status and Supabase connection.
 - **Method**: `GET`
 - **Endpoint**: `/health`

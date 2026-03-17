@@ -1,11 +1,22 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from database import supabase
-from schemas import StudentCreate, StudentUpdate, Student
+from schemas import StudentCreate, StudentUpdate, Student, StudentFullUpdate
 from typing import List
 import csv
 import io
+import re
 
 router = APIRouter(tags=["Students"])
+
+def clean_leetcode_username(raw_id: str) -> str:
+    if not raw_id or not isinstance(raw_id, str):
+        return raw_id
+    raw_id = raw_id.strip().rstrip('/')
+    if '/' in raw_id:
+        raw_id = raw_id.split('/')[-1]
+    raw_id = raw_id.replace('(new)', '')
+    raw_id = re.sub(r'[^a-zA-Z0-9_-].*$', '', raw_id)
+    return raw_id.strip()
 
 @router.get("/students", response_model=List[Student])
 def get_all_students():
@@ -100,3 +111,51 @@ def delete_student(student_id: str):
         return {"message": "Student deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/students/roll/{roll_no}")
+def get_student_by_roll(roll_no: str):
+    try:
+        response = supabase.table("students").select("*").eq("roll_no", roll_no).execute()
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Student not found")
+        return response.data[0]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.put("/students/full")
+def update_student_full(student_update: StudentFullUpdate):
+    try:
+        data = student_update.model_dump(exclude_unset=True)
+        roll_no = data.pop("roll_no")
+        
+        student_fields = {}
+        platform_fields = {}
+        
+        for key, value in data.items():
+            if key in ["name", "department", "section", "year", "hackerrank_username"]:
+                if value is not None:
+                    student_fields[key] = value
+            elif key in ["leetcode_id", "codeforces_id", "codechef_id"]:
+                if key == "leetcode_id" and value:
+                    value = clean_leetcode_username(value)
+                if value is not None:
+                    platform_fields[key] = value
+        
+        if student_fields:
+            student_response = supabase.table("students").update(student_fields).eq("roll_no", roll_no).execute()
+            if not student_response.data:
+                raise HTTPException(status_code=404, detail="Student not found")
+        
+        if platform_fields:
+            platform_response = supabase.table("student_platforms").upsert({
+                "roll_no": roll_no,
+                **platform_fields
+            }).execute()
+        
+        return {"message": "Student updated successfully", "roll_no": roll_no}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.patch("/students/full")
+def patch_student_full(student_update: StudentFullUpdate):
+    return update_student_full(student_update)
