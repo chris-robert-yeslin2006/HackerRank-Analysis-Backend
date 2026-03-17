@@ -60,3 +60,27 @@ class StudentPlatformUpdate(BaseModel):
     leetcode_id: Optional[str] = None
     codeforces_id: Optional[str] = None
     codechef_id: Optional[str] = None
+
+class CodeforcesStats(BaseModel):
+    roll_no: str
+    current_rating: Optional[int] = None
+    max_rating: Optional[int] = None
+    rank: Optional[str] = None
+    contribution: Optional[int] = 0
+    problems_solved: Optional[int] = 0
+    easy_solved: Optional[int] = 0
+    medium_solved: Optional[int] = 0
+    hard_solved: Optional[int] = 0
+    total_contests: Optional[int] = 0
+    last_contest_rating_change: Optional[int] = 0
+
+class CodeChefStats(BaseModel):
+    roll_no: str
+    current_rating: Optional[int] = None
+    max_rating: Optional[int] = None
+    stars: Optional[int] = 0
+    global_rank: Optional[int] = None
+    country_rank: Optional[int] = None
+    total_contests: Optional[int] = 0
+    problems_solved: Optional[int] = 0
+    rating_changes: Optional[list] = []

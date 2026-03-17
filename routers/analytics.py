@@ -6,19 +6,95 @@ router = APIRouter(tags=["Analytics"])
 @router.get("/analytics/department")
 def get_department_leaderboard(platform: str = "hackerrank"):
     try:
-        # Calling the RPC function with platform parameter
-        response = supabase.rpc("get_platform_department_leaderboard", {"p_platform": platform.lower()}).execute()
-        return response.data
+        if platform.lower() == "leetcode":
+            response = supabase.rpc("get_leetcode_analytics", {}).execute()
+            return response.data
+        elif platform.lower() == "codeforces":
+            response = supabase.rpc("get_codeforces_analytics", {}).execute()
+            return response.data
+        elif platform.lower() == "codechef":
+            response = supabase.rpc("get_codechef_analytics", {}).execute()
+            return response.data
+        else:
+            response = supabase.rpc("get_platform_department_leaderboard", {"p_platform": platform.lower()}).execute()
+            return response.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error fetching data. Did you run the RPC SQL in Supabase? Error: {str(e)}")
+
+@router.get("/analytics/platform-department")
+def get_platform_department_leaderboard(platform: str = "hackerrank"):
+    try:
+        if platform.lower() == "codeforces":
+            response = supabase.rpc("get_codeforces_department_leaderboard", {}).execute()
+        elif platform.lower() == "codechef":
+            response = supabase.rpc("get_codechef_department_leaderboard", {}).execute()
+        else:
+            response = supabase.rpc("get_department_leaderboard", {}).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching department leaderboard: {str(e)}")
 
 @router.get("/analytics/leetcode")
 def get_leetcode_analytics():
     try:
-        response = supabase.rpc("get_leetcode_analytics").execute()
+        response = supabase.rpc("get_leetcode_analytics", {}).execute()
         return response.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error fetching LeetCode analytics: {str(e)}")
+
+@router.get("/analytics/codeforces")
+def get_codeforces_analytics():
+    try:
+        response = supabase.rpc("get_codeforces_analytics", {}).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching Codeforces analytics: {str(e)}")
+
+@router.get("/analytics/codechef")
+def get_codechef_analytics():
+    try:
+        response = supabase.rpc("get_codechef_analytics", {}).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching CodeChef analytics: {str(e)}")
+
+@router.get("/analytics/codeforces/absent")
+def get_codeforces_absent_students():
+    """
+    Returns students who have Codeforces IDs but no stats (haven't been synced).
+    """
+    try:
+        response = supabase.rpc("get_students_with_codeforces", {}).execute()
+        students = response.data or []
+        
+        absent = []
+        for student in students:
+            stats_resp = supabase.table("codeforces_stats").select("roll_no").eq("roll_no", student["roll_no"]).execute()
+            if not stats_resp.data:
+                absent.append(student)
+        
+        return absent
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching Codeforces absent students: {str(e)}")
+
+@router.get("/analytics/codechef/absent")
+def get_codechef_absent_students():
+    """
+    Returns students who have CodeChef IDs but no stats (haven't been synced).
+    """
+    try:
+        response = supabase.rpc("get_students_with_codechef", {}).execute()
+        students = response.data or []
+        
+        absent = []
+        for student in students:
+            stats_resp = supabase.table("codechef_stats").select("roll_no").eq("roll_no", student["roll_no"]).execute()
+            if not stats_resp.data:
+                absent.append(student)
+        
+        return absent
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching CodeChef absent students: {str(e)}")
 
 @router.get("/analytics/leetcode/absent/{contest_type}")
 def get_leetcode_absent_students(contest_type: str):
@@ -37,7 +113,7 @@ def get_leetcode_absent_students(contest_type: str):
 @router.get("/analytics/section")
 def get_section_leaderboard():
     try:
-        response = supabase.rpc("get_section_leaderboard").execute()
+        response = supabase.rpc("get_section_leaderboard", {}).execute()
         return response.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -45,7 +121,7 @@ def get_section_leaderboard():
 @router.get("/analytics/top-students")
 def get_top_students():
     try:
-        response = supabase.rpc("get_top_students").execute()
+        response = supabase.rpc("get_top_students", {}).execute()
         return response.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch top students: {str(e)}")
@@ -62,7 +138,7 @@ def get_absent_students(contest_name: str):
 def get_frontend_data():
     try:
         # Get raw joined data with ranks computed in SQL
-        response = supabase.rpc("get_all_raw_data").execute()
+        response = supabase.rpc("get_all_raw_data", {}).execute()
         raw_data = response.data
 
         # We will group by an explicit key to build the structure

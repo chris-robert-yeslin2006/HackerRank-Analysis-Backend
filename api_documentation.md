@@ -411,7 +411,27 @@ Aggregated total scores grouped by department for a specific platform.
   ]
   ```
 
-### 18. LeetCode Analytics
+### 20. Platform-Specific Department Leaderboard
+Returns aggregated ratings by department for Codeforces or CodeChef.
+- **Method**: `GET`
+- **Endpoint**: `/analytics/platform-department?platform={platform}`
+- **Parameters**: `platform` - `codeforces` or `codechef`
+- **Example**: `/analytics/platform-department?platform=codeforces`
+- **Response**: `200 OK`
+  ```json
+  [
+    {
+      "department": "CSE",
+      "total_rating": 15000
+    },
+    {
+      "department": "IT",
+      "total_rating": 12000
+    }
+  ]
+  ```
+
+### 21. LeetCode Analytics
 Returns detailed LeetCode stats for all students, including difficulty breakdown and daily activity.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/leetcode`
@@ -466,7 +486,117 @@ Manually trigger a sync from LeetCode GraphQL API for all students who have a `l
 - **Response**: `200 OK`
   ```json
   {
-    "message": "LeetCode stats synced for 25 students"
+    "message": "LeetCode sync completed for 25 students"
+  }
+  ```
+
+---
+
+## Platform & Codeforces Analytics
+
+### 21. Codeforces Analytics
+Returns detailed Codeforces stats for all students including rating, rank, and problems solved by difficulty.
+- **Method**: `GET`
+- **Endpoint**: `/analytics/codeforces`
+- **Response**: `200 OK`
+  ```json
+  [
+    {
+      "roll_no": "23CS001",
+      "name": "Jane Doe",
+      "department": "CSE",
+      "section": "A",
+      "year": 1,
+      "current_rating": 1400,
+      "max_rating": 1450,
+      "rank": "pupil",
+      "problems_solved": 150,
+      "easy_solved": 80,
+      "medium_solved": 50,
+      "hard_solved": 20,
+      "total_contests": 10,
+      "last_contest_rating_change": 25
+    }
+  ]
+  ```
+
+### 22. Codeforces Absent Students
+Returns students who have a `codeforces_id` but haven't been synced yet.
+- **Method**: `GET`
+- **Endpoint**: `/analytics/codeforces/absent`
+- **Response**: `200 OK`
+  ```json
+  [
+    {
+      "roll_no": "21CS001",
+      "name": "Arjun Kumar",
+      "codeforces_id": "arjun_cf"
+    }
+  ]
+  ```
+
+### 23. Sync Codeforces Stats
+Manually trigger a sync from Codeforces API for all students who have a `codeforces_id`.
+- **Method**: `POST`
+- **Endpoint**: `/sync/codeforces`
+- **Response**: `200 OK`
+  ```json
+  {
+    "message": "Codeforces sync completed for 25 students"
+  }
+  ```
+
+---
+
+## Platform & CodeChef Analytics
+
+### 24. CodeChef Analytics
+Returns detailed CodeChef stats for all students including rating, stars, and contest participation.
+- **Method**: `GET`
+- **Endpoint**: `/analytics/codechef`
+- **Response**: `200 OK`
+  ```json
+  [
+    {
+      "roll_no": "23CS001",
+      "name": "Jane Doe",
+      "department": "CSE",
+      "section": "A",
+      "year": 1,
+      "current_rating": 1600,
+      "max_rating": 1650,
+      "stars": 4,
+      "global_rank": 5000,
+      "country_rank": 200,
+      "total_contests": 15,
+      "problems_solved": 200
+    }
+  ]
+  ```
+
+### 25. CodeChef Absent Students
+Returns students who have a `codechef_id` but haven't been synced yet.
+- **Method**: `GET`
+- **Endpoint**: `/analytics/codechef/absent`
+- **Response**: `200 OK`
+  ```json
+  [
+    {
+      "roll_no": "21CS001",
+      "name": "Arjun Kumar",
+      "codechef_id": "arjun_cc"
+    }
+  ]
+  ```
+
+### 26. Sync CodeChef Stats
+Manually trigger a sync from CodeChef API for all students who have a `codechef_id`.
+- **Method**: `POST`
+- **Endpoint**: `/sync/codechef`
+- **Response**: `200 OK`
+  ```json
+  {
+    "message": "CodeChef sync completed for 25 students"
   }
   ```
 

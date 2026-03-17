@@ -319,3 +319,172 @@ BEGIN
     ORDER BY l.contest_name, rank;
 END;
 $$ LANGUAGE plpgsql;
+
+-- ==========================================
+-- ⚡ Codeforces Stats Table
+-- ==========================================
+CREATE TABLE codeforces_stats (
+    roll_no TEXT PRIMARY KEY,
+    current_rating INT,
+    max_rating INT,
+    rank TEXT,
+    contribution INT DEFAULT 0,
+    problems_solved INT DEFAULT 0,
+    easy_solved INT DEFAULT 0,
+    medium_solved INT DEFAULT 0,
+    hard_solved INT DEFAULT 0,
+    total_contests INT DEFAULT 0,
+    last_contest_rating_change INT DEFAULT 0,
+    contest_name TEXT,
+    updated_at TIMESTAMP DEFAULT NOW(),
+    FOREIGN KEY (roll_no) REFERENCES students(roll_no) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_codeforces_roll_no ON codeforces_stats(roll_no);
+
+-- 13. RPC — Get Students with Codeforces IDs
+CREATE OR REPLACE FUNCTION get_students_with_codeforces()
+RETURNS TABLE (
+    roll_no TEXT,
+    name TEXT,
+    codeforces_id TEXT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        sp.roll_no,
+        s.name,
+        sp.codeforces_id
+    FROM student_platforms sp
+    JOIN students s ON s.roll_no = sp.roll_no
+    WHERE sp.codeforces_id IS NOT NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 14. RPC — Codeforces Analytics
+CREATE OR REPLACE FUNCTION get_codeforces_analytics()
+RETURNS TABLE (
+    roll_no TEXT,
+    name TEXT,
+    department TEXT,
+    section TEXT,
+    year INT,
+    contest_name TEXT,
+    problems_solved INT,
+    rating INT,
+    badge TEXT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        s.roll_no,
+        s.name,
+        s.department,
+        s.section,
+        s.year,
+        cf.contest_name,
+        cf.problems_solved,
+        cf.current_rating,
+        cf.rank
+    FROM students s
+    JOIN codeforces_stats cf ON s.roll_no = cf.roll_no;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 15. RPC — Codeforces Department Leaderboard
+CREATE OR REPLACE FUNCTION get_codeforces_department_leaderboard()
+RETURNS TABLE (department TEXT, total_rating BIGINT) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT s.department, SUM(cf.current_rating)::BIGINT as total_rating
+    FROM codeforces_stats cf
+    JOIN students s ON cf.roll_no = s.roll_no
+    GROUP BY s.department
+    ORDER BY total_rating DESC;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ==========================================
+-- ⚡ CodeChef Stats Table
+-- ==========================================
+CREATE TABLE codechef_stats (
+    roll_no TEXT PRIMARY KEY,
+    current_rating INT,
+    max_rating INT,
+    stars INT DEFAULT 0,
+    global_rank INT,
+    country_rank INT,
+    total_contests INT DEFAULT 0,
+    problems_solved INT DEFAULT 0,
+    contest_name TEXT,
+    contest_rank INT,
+    rating_changes JSONB DEFAULT '[]'::jsonb,
+    updated_at TIMESTAMP DEFAULT NOW(),
+    FOREIGN KEY (roll_no) REFERENCES students(roll_no) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_codechef_roll_no ON codechef_stats(roll_no);
+
+-- 16. RPC — Get Students with CodeChef IDs
+CREATE OR REPLACE FUNCTION get_students_with_codechef()
+RETURNS TABLE (
+    roll_no TEXT,
+    name TEXT,
+    codechef_id TEXT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        sp.roll_no,
+        s.name,
+        sp.codechef_id
+    FROM student_platforms sp
+    JOIN students s ON s.roll_no = sp.roll_no
+    WHERE sp.codechef_id IS NOT NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 17. RPC — CodeChef Analytics
+CREATE OR REPLACE FUNCTION get_codechef_analytics()
+RETURNS TABLE (
+    roll_no TEXT,
+    name TEXT,
+    department TEXT,
+    section TEXT,
+    year INT,
+    contest_name TEXT,
+    contest_rank INT,
+    problems_solved INT,
+    rating INT,
+    star INT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        s.roll_no,
+        s.name,
+        s.department,
+        s.section,
+        s.year,
+        cc.contest_name,
+        cc.contest_rank,
+        cc.problems_solved,
+        cc.current_rating,
+        cc.stars
+    FROM students s
+    JOIN codechef_stats cc ON s.roll_no = cc.roll_no;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 18. RPC — CodeChef Department Leaderboard
+CREATE OR REPLACE FUNCTION get_codechef_department_leaderboard()
+RETURNS TABLE (department TEXT, total_rating BIGINT) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT s.department, SUM(cc.current_rating)::BIGINT as total_rating
+    FROM codechef_stats cc
+    JOIN students s ON cc.roll_no = s.roll_no
+    GROUP BY s.department
+    ORDER BY total_rating DESC;
+END;
+$$ LANGUAGE plpgsql;

@@ -3,7 +3,7 @@ import asyncio
 import re
 from fastapi import APIRouter, HTTPException
 from database import supabase
-from typing import Dict, Any
+from typing import Dict, Any, List
 from datetime import datetime, timezone
 
 router = APIRouter(tags=["Sync"])
@@ -211,7 +211,7 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
 async def sync_leetcode():
     try:
         # Get students who have a leetcode_id
-        response = supabase.rpc("get_students_with_leetcode").execute()
+        response = supabase.rpc("get_students_with_leetcode",{}).execute()
         students = response.data
 
         if not students:
@@ -225,5 +225,251 @@ async def sync_leetcode():
             await asyncio.gather(*tasks)
 
         return {"message": f"LeetCode sync completed for {len(students)} students"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Sync failed: {str(e)}")
+
+# ==========================================
+# 🔄 Codeforces Sync
+# ==========================================
+CODEFORCES_API_BASE = "https://codeforces.com/api"
+
+async def fetch_codeforces_user_info(client: httpx.AsyncClient, username: str) -> Dict[str, Any]:
+    """Fetch user info from Codeforces API"""
+    try:
+        r = await client.get(f"{CODEFORCES_API_BASE}/user.info", params={"handles": username}, timeout=20.0)
+        r.raise_for_status()
+        data = r.json()
+        if data.get("status") == "OK" and data.get("result"):
+            return data["result"][0]
+    except Exception as e:
+        print(f"Error fetching Codeforces user info for {username}: {e}")
+    return {}
+
+async def fetch_codeforces_rating(client: httpx.AsyncClient, username: str) -> List[Dict[str, Any]]:
+    """Fetch user's rating history"""
+    try:
+        r = await client.get(f"{CODEFORCES_API_BASE}/user.rating", params={"handle": username}, timeout=20.0)
+        r.raise_for_status()
+        data = r.json()
+        if data.get("status") == "OK":
+            return data.get("result", [])
+    except Exception as e:
+        print(f"Error fetching Codeforces rating for {username}: {e}")
+    return []
+
+async def fetch_codeforces_submissions(client: httpx.AsyncClient, username: str) -> List[Dict[str, Any]]:
+    """Fetch user's submissions for problem stats"""
+    try:
+        r = await client.get(f"{CODEFORCES_API_BASE}/user.status", params={"handle": username}, timeout=30.0)
+        r.raise_for_status()
+        data = r.json()
+        if data.get("status") == "OK":
+            return data.get("result", [])
+    except Exception as e:
+        print(f"Error fetching Codeforces submissions for {username}: {e}")
+    return []
+
+async def fetch_codeforces_contest(client: httpx.AsyncClient, contest_id: int, username: str) -> Dict[str, Any]:
+    """Fetch user's result in a specific contest"""
+    try:
+        r = await client.get(f"{CODEFORCES_API_BASE}/contest.standings", params={"contestId": contest_id, "handles": username, "includeTeamParticipants": "false"}, timeout=20.0)
+        r.raise_for_status()
+        data = r.json()
+        if data.get("status") == "OK" and data.get("result", {}).get("rows"):
+            return data["result"]["rows"][0]
+    except Exception as e:
+        print(f"Error fetching Codeforces contest {contest_id}: {e}")
+    return {}
+
+async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, Any], semaphore: asyncio.Semaphore):
+    username = student.get("codeforces_id", "").strip()
+    if not username:
+        print(f"Empty Codeforces ID for student {student.get('roll_no')}")
+        return
+
+    async with semaphore:
+        try:
+            await asyncio.sleep(1.5)  # Rate limiting - 2s between requests
+
+            user_info = await fetch_codeforces_user_info(client, username)
+            if not user_info:
+                print(f"User {username} not found on Codeforces")
+                return
+
+            rating_history = await fetch_codeforces_rating(client, username)
+            submissions = await fetch_codeforces_submissions(client, username)
+
+            current_rating = user_info.get("rating")
+            max_rating = user_info.get("maxRating")
+            rank = user_info.get("rank")
+            contribution = user_info.get("contribution", 0)
+
+            easy_solved = set()
+            medium_solved = set()
+            hard_solved = set()
+
+            for sub in submissions:
+                if sub.get("verdict") == "OK":
+                    prob = sub.get("problem", {})
+                    tags = prob.get("tags", [])
+                    idx = prob.get("index", "")
+                    if idx.startswith("1"):
+                        easy_solved.add(prob.get("name"))
+                    elif idx.startswith("2"):
+                        medium_solved.add(prob.get("name"))
+                    elif idx.startswith("3"):
+                        hard_solved.add(prob.get("name"))
+
+            total_contests = len(rating_history)
+            last_rating_change = 0
+            contest_name = None
+            
+            if total_contests >= 1:
+                last_contest = rating_history[-1]
+                contest_name = last_contest.get("contestName", None)
+                if total_contests >= 2:
+                    last_rating_change = rating_history[-1].get("newRating", 0) - rating_history[-2].get("newRating", 0)
+                elif total_contests == 1:
+                    last_rating_change = rating_history[0].get("newRating", 0) - rating_history[0].get("oldRating", 0)
+
+            supabase.table("codeforces_stats").upsert({
+                "roll_no": student["roll_no"],
+                "current_rating": current_rating,
+                "max_rating": max_rating,
+                "rank": rank,
+                "contribution": contribution,
+                "problems_solved": len(easy_solved) + len(medium_solved) + len(hard_solved),
+                "easy_solved": len(easy_solved),
+                "medium_solved": len(medium_solved),
+                "hard_solved": len(hard_solved),
+                "total_contests": total_contests,
+                "last_contest_rating_change": last_rating_change,
+                "contest_name": contest_name,
+                "updated_at": "now()"
+            }).execute()
+
+            print(f"✅ Updated Codeforces: {student.get('roll_no')} - Rating: {current_rating}")
+
+        except Exception as e:
+            print(f"Error fetching Codeforces data for {username}: {str(e)}")
+
+@router.post("/sync/codeforces")
+async def sync_codeforces():
+    try:
+        response = supabase.rpc("get_students_with_codeforces",{}).execute()
+        students = response.data
+
+        if not students:
+            return {"message": "No students with Codeforces IDs found"}
+
+        semaphore = asyncio.Semaphore(3)  # Lower concurrency for CF API limits
+
+        async with httpx.AsyncClient(timeout=40.0) as client:
+            tasks = [fetch_codeforces_data(client, student, semaphore) for student in students]
+            await asyncio.gather(*tasks)
+
+        return {"message": f"Codeforces sync completed for {len(students)} students"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Sync failed: {str(e)}")
+
+# ==========================================
+# 🔄 CodeChef Sync
+# ==========================================
+CODECHEF_API_URL = "https://code-chef-bot.onrender.com/handle"
+
+async def fetch_codechef_data(client: httpx.AsyncClient, student: Dict[str, Any], semaphore: asyncio.Semaphore):
+    username = student.get("codechef_id", "").strip()
+    if not username:
+        print(f"Empty CodeChef ID for student {student.get('roll_no')}")
+        return
+
+    async with semaphore:
+        try:
+            await asyncio.sleep(0.5)
+
+            r = await client.get(f"{CODECHEF_API_URL}/{username}", timeout=30.0)
+            
+            if r.status_code == 404:
+                print(f"⚠️ CodeChef user not found: {username}")
+                return
+            
+            r.raise_for_status()
+            data = r.json()
+            
+            if not data or not data.get("currentRating"):
+                print(f"⚠️ No rating data for CodeChef user: {username}")
+                return
+
+            current_rating = data.get("currentRating")
+            max_rating = data.get("maxRating")
+            
+            stars_raw = data.get("stars", "0")
+            try:
+                stars = int(stars_raw) if isinstance(stars_raw, int) else int(stars_raw.replace("★", "").strip())
+            except (ValueError, AttributeError):
+                stars = 0
+            
+            global_rank_raw = data.get("globalRank")
+            try:
+                global_rank = int(global_rank_raw) if global_rank_raw else None
+            except (ValueError, TypeError):
+                global_rank = None
+                
+            country_rank_raw = data.get("countryRank")
+            try:
+                country_rank = int(country_rank_raw) if country_rank_raw else None
+            except (ValueError, TypeError):
+                country_rank = None
+            
+            total_contests = data.get("contestCount", 0)
+            problems_solved = data.get("problemCount", 0)
+
+            rating_data = data.get("ratingData", [])
+            last_five = rating_data[-5:] if len(rating_data) > 5 else rating_data
+            rating_changes = [{"contest": r.get("contestCode", ""), "rating": r.get("rating", 0), "change": r.get("change", 0)} for r in last_five]
+            
+            contest_name = None
+            contest_rank = None
+            if rating_data:
+                last_rating = rating_data[-1]
+                contest_name = last_rating.get("contestCode", None)
+                contest_rank = last_rating.get("rank", None)
+
+            supabase.table("codechef_stats").upsert({
+                "roll_no": student["roll_no"],
+                "current_rating": current_rating,
+                "max_rating": max_rating,
+                "stars": stars,
+                "global_rank": global_rank,
+                "country_rank": country_rank,
+                "total_contests": total_contests,
+                "problems_solved": problems_solved,
+                "contest_name": contest_name,
+                "contest_rank": contest_rank,
+                "rating_changes": rating_changes,
+                "updated_at": "now()"
+            }).execute()
+
+            print(f"✅ Updated CodeChef: {student.get('roll_no')} - Rating: {current_rating}")
+
+        except Exception as e:
+            print(f"Error fetching CodeChef data for {username}: {str(e)}")
+
+@router.post("/sync/codechef")
+async def sync_codechef():
+    try:
+        response = supabase.rpc("get_students_with_codechef",{}).execute()
+        students = response.data
+
+        if not students:
+            return {"message": "No students with CodeChef IDs found"}
+
+        semaphore = asyncio.Semaphore(5)
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            tasks = [fetch_codechef_data(client, student, semaphore) for student in students]
+            await asyncio.gather(*tasks)
+
+        return {"message": f"CodeChef sync completed for {len(students)} students"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Sync failed: {str(e)}")
