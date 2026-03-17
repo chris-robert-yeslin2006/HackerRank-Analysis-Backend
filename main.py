@@ -16,6 +16,7 @@ app = FastAPI(
 
 origins = [
     "https://hacker-rank-analyzer.vercel.app",
+    "http://localhost:3000",
 ]
 
 app.add_middleware(
