@@ -132,37 +132,50 @@ def get_codechef_analytics():
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error fetching CodeChef analytics: {str(e)}")
 
-@router.get("/analytics/codeforces/absent")
-def get_codeforces_absent_students():
+@router.get("/analytics/codeforces/absent/{contest_name}")
+def get_codeforces_absent_students(contest_name: str):
+    cache_key = f"cf_absent_{contest_name}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    
     try:
-        response = supabase.rpc("get_students_with_codeforces", {}).execute()
-        students = response.data or []
-        
-        absent = []
-        for student in students:
-            stats_resp = supabase.table("codeforces_stats").select("roll_no").eq("roll_no", student["roll_no"]).execute()
-            if not stats_resp.data:
-                absent.append(student)
-        
-        return absent
+        response = supabase.rpc("get_codeforces_absent_students", {"p_contest_name": contest_name}).execute()
+        data = response.data
+        set_cached(cache_key, data)
+        return data
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error fetching Codeforces absent students: {str(e)}")
 
 @router.get("/analytics/codechef/absent")
 def get_codechef_absent_students():
+    cache_key = "cc_absent"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    
     try:
-        response = supabase.rpc("get_students_with_codechef", {}).execute()
-        students = response.data or []
-        
-        absent = []
-        for student in students:
-            stats_resp = supabase.table("codechef_stats").select("roll_no").eq("roll_no", student["roll_no"]).execute()
-            if not stats_resp.data:
-                absent.append(student)
-        
-        return absent
+        response = supabase.rpc("get_codechef_absent_students", {}).execute()
+        data = response.data
+        set_cached(cache_key, data)
+        return data
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error fetching CodeChef absent students: {str(e)}")
+
+@router.get("/analytics/codeforces/absent")
+def get_codeforces_all_absent():
+    cache_key = "cf_absent_all"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    
+    try:
+        response = supabase.rpc("get_all_codeforces_absent", {}).execute()
+        data = response.data
+        set_cached(cache_key, data)
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching Codeforces absent students: {str(e)}")
 
 @router.get("/analytics/leetcode/absent/{contest_type}")
 def get_leetcode_absent_students(contest_type: str):

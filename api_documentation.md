@@ -584,22 +584,18 @@ Returns detailed Codeforces stats for all students including rating, rank, and p
   ]
   ```
 
-### 28. Codeforces Absent Students
+### 28. Codeforces Absent Students (All)
 Returns students who have a `codeforces_id` but haven't been synced yet.
 - **Method**: `GET`
 - **Endpoint**: `/analytics/codeforces/absent`
-- **Response**: `200 OK`
-  ```json
-  [
-    {
-      "roll_no": "21CS001",
-      "name": "Arjun Kumar",
-      "codeforces_id": "arjun_cf"
-    }
-  ]
-  ```
 
-### 29. Sync Codeforces Stats
+### 29. Codeforces Absent for Specific Contest
+Returns students who have a `codeforces_id` but did not participate in a specific contest.
+- **Method**: `GET`
+- **Endpoint**: `/analytics/codeforces/absent/{contest_name}`
+- **Example**: `/analytics/codeforces/absent/DIV1`
+
+### 30. Sync Codeforces Stats
 Manually trigger a sync from Codeforces API for all students who have a `codeforces_id`.
 - **Method**: `POST`
 - **Endpoint**: `/sync/codeforces`
@@ -648,7 +644,10 @@ Returns students who have a `codechef_id` but haven't been synced yet.
     {
       "roll_no": "21CS001",
       "name": "Arjun Kumar",
-      "codechef_id": "arjun_cc"
+      "codechef_id": "arjun_cc",
+      "department": "CSE",
+      "section": "A",
+      "year": 1
     }
   ]
   ```

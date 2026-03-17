@@ -488,3 +488,64 @@ BEGIN
     ORDER BY total_rating DESC;
 END;
 $$ LANGUAGE plpgsql;
+
+-- CodeChef Absent Students (no stats at all)
+CREATE OR REPLACE FUNCTION get_codechef_absent_students()
+RETURNS TABLE (roll_no TEXT, name TEXT, codechef_id TEXT, department TEXT, section TEXT, year INT) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        sp.roll_no,
+        s.name,
+        sp.codechef_id,
+        s.department,
+        s.section,
+        s.year
+    FROM student_platforms sp
+    JOIN students s ON s.roll_no = sp.roll_no
+    WHERE sp.codechef_id IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM codechef_stats cc WHERE cc.roll_no = sp.roll_no);
+END;
+$$ LANGUAGE plpgsql;
+
+-- Codeforces Absent (all students with CF ID but no stats)
+CREATE OR REPLACE FUNCTION get_all_codeforces_absent()
+RETURNS TABLE (roll_no TEXT, name TEXT, codeforces_id TEXT, department TEXT, section TEXT, year INT) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        sp.roll_no,
+        s.name,
+        sp.codeforces_id,
+        s.department,
+        s.section,
+        s.year
+    FROM student_platforms sp
+    JOIN students s ON s.roll_no = sp.roll_no
+    WHERE sp.codeforces_id IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM codeforces_stats cf WHERE cf.roll_no = sp.roll_no);
+END;
+$$ LANGUAGE plpgsql;
+
+-- Codeforces Absent for specific contest
+CREATE OR REPLACE FUNCTION get_codeforces_absent_students(p_contest_name TEXT)
+RETURNS TABLE (roll_no TEXT, name TEXT, codeforces_id TEXT, department TEXT, section TEXT, year INT) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        sp.roll_no,
+        s.name,
+        sp.codeforces_id,
+        s.department,
+        s.section,
+        s.year
+    FROM student_platforms sp
+    JOIN students s ON s.roll_no = sp.roll_no
+    WHERE sp.codeforces_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM codeforces_stats cf 
+        WHERE cf.roll_no = sp.roll_no 
+        AND cf.contest_name = p_contest_name
+    );
+END;
+$$ LANGUAGE plpgsql;
