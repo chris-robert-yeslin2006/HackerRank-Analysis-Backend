@@ -48,6 +48,11 @@ async def retry_with_backoff(func, *args, max_retries=3, **kwargs):
             logger.error(f"Non-retryable error: {str(e)}")
             raise
 
+
+def chunk_list(lst: list, chunk_size: int) -> list:
+    """Split a list into chunks of specified size."""
+    return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
+
 def clean_leetcode_username(raw_id: str) -> str:
     if not raw_id or not isinstance(raw_id, str):
         return ""
@@ -228,8 +233,8 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
 
 async def sync_leetcode_service(job_id: Optional[str] = None) -> Dict[str, Any]:
     logger.info("Starting LeetCode sync...")
-    processed = 0
-    total = 0
+    BATCH_SIZE = 50
+    
     try:
         response = supabase.rpc("get_students_with_leetcode",{}).execute()
         students = response.data
@@ -241,18 +246,27 @@ async def sync_leetcode_service(job_id: Optional[str] = None) -> Dict[str, Any]:
         if job_id:
             update_job_progress(job_id, 0, total)
 
-        semaphore = asyncio.Semaphore(5)
+        batches = chunk_list(students, BATCH_SIZE)
+        logger.info(f"Processing {len(batches)} batches of up to {BATCH_SIZE} students each")
+        
         processed_count = 0
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            for i, student in enumerate(students):
-                await fetch_user(client, student, semaphore)
-                processed_count += 1
-                if job_id and i % 10 == 0:
+            for batch_num, batch in enumerate(batches, 1):
+                logger.info(f"Processing batch {batch_num}/{len(batches)} ({len(batch)} students)")
+                semaphore = asyncio.Semaphore(5)
+                
+                tasks = [fetch_user(client, student, semaphore) for student in batch]
+                await asyncio.gather(*tasks)
+                
+                processed_count += len(batch)
+                if job_id:
                     update_job_progress(job_id, processed_count, total)
+                
+                await asyncio.sleep(1)
 
-        logger.info(f"LeetCode sync completed for {len(students)} students")
-        return {"message": f"LeetCode sync completed for {len(students)} students", "status": "success"}
+        logger.info(f"LeetCode sync completed for {total} students")
+        return {"message": f"LeetCode sync completed for {total} students", "status": "success"}
     except Exception as e:
         logger.error(f"LeetCode sync failed: {str(e)}")
         return {"message": f"LeetCode sync failed: {str(e)}", "status": "error", "error": str(e)}
@@ -398,6 +412,8 @@ async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, An
 
 async def sync_codeforces_service(job_id: Optional[str] = None) -> Dict[str, Any]:
     logger.info("Starting Codeforces sync...")
+    BATCH_SIZE = 50
+    
     try:
         global _recent_contests_cache
         _recent_contests_cache = []
@@ -412,18 +428,27 @@ async def sync_codeforces_service(job_id: Optional[str] = None) -> Dict[str, Any
         if job_id:
             update_job_progress(job_id, 0, total)
 
-        semaphore = asyncio.Semaphore(25)
+        batches = chunk_list(students, BATCH_SIZE)
+        logger.info(f"Processing {len(batches)} batches of up to {BATCH_SIZE} students each")
+        
         processed_count = 0
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            for i, student in enumerate(students):
-                await fetch_codeforces_data(client, student, semaphore)
-                processed_count += 1
-                if job_id and i % 10 == 0:
+            for batch_num, batch in enumerate(batches, 1):
+                logger.info(f"Processing batch {batch_num}/{len(batches)} ({len(batch)} students)")
+                semaphore = asyncio.Semaphore(25)
+                
+                tasks = [fetch_codeforces_data(client, student, semaphore) for student in batch]
+                await asyncio.gather(*tasks)
+                
+                processed_count += len(batch)
+                if job_id:
                     update_job_progress(job_id, processed_count, total)
+                
+                await asyncio.sleep(1)
 
-        logger.info(f"Codeforces sync completed for {len(students)} students")
-        return {"message": f"Codeforces sync completed for {len(students)} students", "status": "success"}
+        logger.info(f"Codeforces sync completed for {total} students")
+        return {"message": f"Codeforces sync completed for {total} students", "status": "success"}
     except Exception as e:
         logger.error(f"Codeforces sync failed: {str(e)}")
         return {"message": f"Codeforces sync failed: {str(e)}", "status": "error", "error": str(e)}
@@ -517,6 +542,8 @@ async def fetch_codechef_data(client: httpx.AsyncClient, student: Dict[str, Any]
 
 async def sync_codechef_service(job_id: Optional[str] = None) -> Dict[str, Any]:
     logger.info("Starting CodeChef sync...")
+    BATCH_SIZE = 50
+    
     try:
         response = supabase.rpc("get_students_with_codechef",{}).execute()
         students = response.data
@@ -528,20 +555,30 @@ async def sync_codechef_service(job_id: Optional[str] = None) -> Dict[str, Any]:
         if job_id:
             update_job_progress(job_id, 0, total)
 
-        semaphore = asyncio.Semaphore(25)
+        batches = chunk_list(students, BATCH_SIZE)
+        logger.info(f"Processing {len(batches)} batches of up to {BATCH_SIZE} students each")
+        
         processed_count = 0
 
         async with httpx.AsyncClient(timeout=20.0) as client:
-            for i, student in enumerate(students):
-                await fetch_codechef_data(client, student, semaphore)
-                processed_count += 1
-                if job_id and i % 10 == 0:
+            for batch_num, batch in enumerate(batches, 1):
+                logger.info(f"Processing batch {batch_num}/{len(batches)} ({len(batch)} students)")
+                semaphore = asyncio.Semaphore(25)
+                
+                tasks = [fetch_codechef_data(client, student, semaphore) for student in batch]
+                await asyncio.gather(*tasks)
+                
+                processed_count += len(batch)
+                if job_id:
                     update_job_progress(job_id, processed_count, total)
+                
+                await asyncio.sleep(1)
 
-        logger.info(f"CodeChef sync completed for {len(students)} students")
-        return {"message": f"CodeChef sync completed for {len(students)} students", "status": "success"}
+        logger.info(f"CodeChef sync completed for {total} students")
+        return {"message": f"CodeChef sync completed for {total} students", "status": "success"}
     except Exception as e:
         logger.error(f"CodeChef sync failed: {str(e)}")
+        return {"message": f"CodeChef sync failed: {str(e)}", "status": "error", "error": str(e)}
         return {"message": f"CodeChef sync failed: {str(e)}", "status": "error", "error": str(e)}
 
 
