@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from database import supabase
 
 # Import routers
-from routers import auth, students, leaderboard, analytics, sync, platforms
+from routers import auth, students, leaderboard, analytics, sync, platforms, chat
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -34,6 +34,7 @@ app.include_router(leaderboard.router)
 app.include_router(analytics.router)
 app.include_router(sync.router)
 app.include_router(platforms.router)
+app.include_router(chat.router)
 
 @app.get("/")
 def read_root():

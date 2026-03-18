@@ -1,0 +1,125 @@
+{
+  "project_name": "HackerRank Analysis Backend",
+  "database_type": "PostgreSQL (Supabase)",
+  "tables": [
+    {
+      "name": "students",
+      "description": "Primary table storing core student information.",
+      "columns": [
+        { "name": "id", "type": "UUID", "constraints": ["PRIMARY KEY", "DEFAULT gen_random_uuid()"] },
+        { "name": "roll_no", "type": "TEXT", "constraints": ["NOT NULL", "UNIQUE"] },
+        { "name": "name", "type": "TEXT", "constraints": ["NOT NULL"] },
+        { "name": "department", "type": "TEXT", "constraints": ["NOT NULL"] },
+        { "name": "section", "type": "TEXT", "constraints": ["NOT NULL"] },
+        { "name": "year", "type": "INT", "constraints": ["NOT NULL"] },
+        { "name": "hackerrank_username", "type": "TEXT", "constraints": ["UNIQUE"] },
+        { "name": "created_at", "type": "TIMESTAMP", "constraints": ["DEFAULT NOW()"] }
+      ],
+      "indexes": ["idx_student_username (hackerrank_username)"]
+    },
+    {
+      "name": "leaderboard",
+      "description": "Stores contest results primarily from HackerRank.",
+      "columns": [
+        { "name": "id", "type": "UUID", "constraints": ["PRIMARY KEY", "DEFAULT gen_random_uuid()"] },
+        { "name": "contest_name", "type": "TEXT", "constraints": ["NOT NULL"] },
+        { "name": "contest_date", "type": "DATE", "constraints": [] },
+        { "name": "username", "type": "TEXT", "constraints": ["NOT NULL"] },
+        { "name": "score", "type": "INT", "constraints": [] },
+        { "name": "time_taken", "type": "INT", "constraints": [] },
+        { "name": "created_at", "type": "TIMESTAMP", "constraints": ["DEFAULT NOW()"] }
+      ],
+      "indexes": ["idx_leaderboard_username (username)"]
+    },
+    {
+      "name": "student_platforms",
+      "description": "Maps student roll numbers to their handles on various competitive programming platforms.",
+      "columns": [
+        { "name": "roll_no", "type": "TEXT", "constraints": ["PRIMARY KEY", "FOREIGN KEY REFERENCES students(roll_no) ON DELETE CASCADE"] },
+        { "name": "leetcode_id", "type": "TEXT", "constraints": [] },
+        { "name": "codeforces_id", "type": "TEXT", "constraints": [] },
+        { "name": "codechef_id", "type": "TEXT", "constraints": [] },
+        { "name": "created_at", "type": "TIMESTAMP", "constraints": ["DEFAULT NOW()"] }
+      ],
+      "indexes": ["idx_platforms_roll_no (roll_no)"]
+    },
+    {
+      "name": "leetcode_stats",
+      "description": "Stores detailed statistics synced from LeetCode.",
+      "columns": [
+        { "name": "roll_no", "type": "TEXT", "constraints": ["PRIMARY KEY", "FOREIGN KEY REFERENCES students(roll_no) ON DELETE CASCADE"] },
+        { "name": "weekly_rank", "type": "INT", "constraints": [] },
+        { "name": "weekly_problems_solved", "type": "INT", "constraints": [] },
+        { "name": "biweekly_rank", "type": "INT", "constraints": [] },
+        { "name": "biweekly_problems_solved", "type": "INT", "constraints": [] },
+        { "name": "contest_rating", "type": "INT", "constraints": [] },
+        { "name": "total_problems_solved", "type": "INT", "constraints": [] },
+        { "name": "easy_solved", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "medium_solved", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "hard_solved", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "easy_today", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "medium_today", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "hard_today", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "updated_at", "type": "TIMESTAMP", "constraints": ["DEFAULT NOW()"] }
+      ],
+      "indexes": ["idx_leetcode_roll_no (roll_no)"]
+    },
+    {
+      "name": "codeforces_stats",
+      "description": "Stores detailed statistics synced from Codeforces.",
+      "columns": [
+        { "name": "roll_no", "type": "TEXT", "constraints": ["PRIMARY KEY", "FOREIGN KEY REFERENCES students(roll_no) ON DELETE CASCADE"] },
+        { "name": "current_rating", "type": "INT", "constraints": [] },
+        { "name": "max_rating", "type": "INT", "constraints": [] },
+        { "name": "rank", "type": "TEXT", "constraints": [] },
+        { "name": "contribution", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "problems_solved", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "easy_solved", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "medium_solved", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "hard_solved", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "total_contests", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "contest_name", "type": "TEXT", "constraints": [] },
+        { "name": "rating_changes", "type": "JSONB", "constraints": ["DEFAULT '[]'::jsonb"] },
+        { "name": "updated_at", "type": "TIMESTAMP", "constraints": ["DEFAULT NOW()"] }
+      ],
+      "indexes": ["idx_codeforces_roll_no (roll_no)"]
+    },
+    {
+      "name": "codechef_stats",
+      "description": "Stores detailed statistics synced from CodeChef.",
+      "columns": [
+        { "name": "roll_no", "type": "TEXT", "constraints": ["PRIMARY KEY", "FOREIGN KEY REFERENCES students(roll_no) ON DELETE CASCADE"] },
+        { "name": "current_rating", "type": "INT", "constraints": [] },
+        { "name": "max_rating", "type": "INT", "constraints": [] },
+        { "name": "stars", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "global_rank", "type": "INT", "constraints": [] },
+        { "name": "country_rank", "type": "INT", "constraints": [] },
+        { "name": "total_contests", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "problems_solved", "type": "INT", "constraints": ["DEFAULT 0"] },
+        { "name": "contest_name", "type": "TEXT", "constraints": [] },
+        { "name": "contest_rank", "type": "INT", "constraints": [] },
+        { "name": "rating_changes", "type": "JSONB", "constraints": ["DEFAULT '[]'::jsonb"] },
+        { "name": "updated_at", "type": "TIMESTAMP", "constraints": ["DEFAULT NOW()"] }
+      ],
+      "indexes": ["idx_codechef_roll_no (roll_no)"]
+    }
+  ],
+  "relationships": [
+    { "from": "student_platforms.roll_no", "to": "students.roll_no", "type": "1:1", "on_delete": "CASCADE" },
+    { "from": "leetcode_stats.roll_no", "to": "students.roll_no", "type": "1:1", "on_delete": "CASCADE" },
+    { "from": "codeforces_stats.roll_no", "to": "students.roll_no", "type": "1:1", "on_delete": "CASCADE" },
+    { "from": "codechef_stats.roll_no", "to": "students.roll_no", "type": "1:1", "on_delete": "CASCADE" },
+    { "from": "leaderboard.username", "to": "students.hackerrank_username", "type": "M:1", "description": "Implicit relationship based on username handles." }
+  ],
+  "analytics_functions_rpcs": [
+    { "name": "get_department_leaderboard", "description": "Aggregated scores by department for HackerRank." },
+    { "name": "get_section_leaderboard", "description": "Aggregated scores by section for HackerRank." },
+    { "name": "get_top_students", "description": "Returns top 10 students by total score." },
+    { "name": "get_absent_students", "params": ["p_contest_name"], "description": "Students who missed a specific HackerRank contest." },
+    { "name": "get_all_raw_data", "description": "Returns raw data with calculated rank for all contests." },
+    { "name": "get_leetcode_analytics", "description": "Detailed LeetCode stats for all students." },
+    { "name": "get_codeforces_analytics", "description": "Detailed Codeforces stats for all students." },
+    { "name": "get_codechef_analytics", "description": "Detailed CodeChef stats for all students." },
+    { "name": "get_platform_department_leaderboard", "params": ["p_platform"], "description": "Generic department leaderboard for multiple platforms." }
+  ]
+}
