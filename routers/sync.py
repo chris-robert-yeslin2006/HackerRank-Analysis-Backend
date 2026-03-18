@@ -4,8 +4,9 @@ import re
 import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from database import supabase
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
+from uuid import UUID
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -13,6 +14,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Sync"])
 
 LEETCODE_URL = "https://leetcode.com/graphql"
+
+
+def update_job_progress(job_id: str, processed: int, total: int):
+    try:
+        supabase.table("sync_jobs").update({
+            "processed_students": processed,
+            "total_students": total
+        }).eq("id", job_id).execute()
+    except Exception as e:
+        logger.error(f"Failed to update job progress: {e}")
 
 def clean_leetcode_username(raw_id: str) -> str:
     if not raw_id or not isinstance(raw_id, str):
@@ -193,8 +204,10 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
             logger.error(f"Error fetching data for {username}: {str(e)}")
 
 
-async def sync_leetcode_service() -> Dict[str, Any]:
+async def sync_leetcode_service(job_id: Optional[str] = None) -> Dict[str, Any]:
     logger.info("Starting LeetCode sync...")
+    processed = 0
+    total = 0
     try:
         response = supabase.rpc("get_students_with_leetcode",{}).execute()
         students = response.data
@@ -202,11 +215,19 @@ async def sync_leetcode_service() -> Dict[str, Any]:
         if not students:
             return {"message": "No students with LeetCode IDs found", "status": "success"}
 
+        total = len(students)
+        if job_id:
+            update_job_progress(job_id, 0, total)
+
         semaphore = asyncio.Semaphore(5)
+        processed_count = 0
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            tasks = [fetch_user(client, student, semaphore) for student in students]
-            await asyncio.gather(*tasks)
+            for i, student in enumerate(students):
+                await fetch_user(client, student, semaphore)
+                processed_count += 1
+                if job_id and i % 10 == 0:
+                    update_job_progress(job_id, processed_count, total)
 
         logger.info(f"LeetCode sync completed for {len(students)} students")
         return {"message": f"LeetCode sync completed for {len(students)} students", "status": "success"}
@@ -345,7 +366,7 @@ async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, An
             logger.error(f"Error fetching Codeforces data for {username}: {str(e)}")
 
 
-async def sync_codeforces_service() -> Dict[str, Any]:
+async def sync_codeforces_service(job_id: Optional[str] = None) -> Dict[str, Any]:
     logger.info("Starting Codeforces sync...")
     try:
         global _recent_contests_cache
@@ -357,11 +378,19 @@ async def sync_codeforces_service() -> Dict[str, Any]:
         if not students:
             return {"message": "No students with Codeforces IDs found", "status": "success"}
 
+        total = len(students)
+        if job_id:
+            update_job_progress(job_id, 0, total)
+
         semaphore = asyncio.Semaphore(25)
+        processed_count = 0
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            tasks = [fetch_codeforces_data(client, student, semaphore) for student in students]
-            await asyncio.gather(*tasks)
+            for i, student in enumerate(students):
+                await fetch_codeforces_data(client, student, semaphore)
+                processed_count += 1
+                if job_id and i % 10 == 0:
+                    update_job_progress(job_id, processed_count, total)
 
         logger.info(f"Codeforces sync completed for {len(students)} students")
         return {"message": f"Codeforces sync completed for {len(students)} students", "status": "success"}
@@ -456,7 +485,7 @@ async def fetch_codechef_data(client: httpx.AsyncClient, student: Dict[str, Any]
             logger.error(f"Error fetching CodeChef data for {username}: {str(e)}")
 
 
-async def sync_codechef_service() -> Dict[str, Any]:
+async def sync_codechef_service(job_id: Optional[str] = None) -> Dict[str, Any]:
     logger.info("Starting CodeChef sync...")
     try:
         response = supabase.rpc("get_students_with_codechef",{}).execute()
@@ -465,11 +494,19 @@ async def sync_codechef_service() -> Dict[str, Any]:
         if not students:
             return {"message": "No students with CodeChef IDs found", "status": "success"}
 
+        total = len(students)
+        if job_id:
+            update_job_progress(job_id, 0, total)
+
         semaphore = asyncio.Semaphore(25)
+        processed_count = 0
 
         async with httpx.AsyncClient(timeout=20.0) as client:
-            tasks = [fetch_codechef_data(client, student, semaphore) for student in students]
-            await asyncio.gather(*tasks)
+            for i, student in enumerate(students):
+                await fetch_codechef_data(client, student, semaphore)
+                processed_count += 1
+                if job_id and i % 10 == 0:
+                    update_job_progress(job_id, processed_count, total)
 
         logger.info(f"CodeChef sync completed for {len(students)} students")
         return {"message": f"CodeChef sync completed for {len(students)} students", "status": "success"}
@@ -486,25 +523,53 @@ async def sync_codechef():
 async def run_full_sync():
     logger.info("=== FULL SYNC STARTED ===")
     
-    try:
-        codeforces_result = await sync_codeforces_service()
-        logger.info(f"Codeforces sync: {codeforces_result.get('status')}")
-    except Exception as e:
-        logger.error(f"Codeforces sync error: {str(e)}")
+    platforms = ["codeforces", "codechef", "leetcode"]
     
-    try:
-        codechef_result = await sync_codechef_service()
-        logger.info(f"CodeChef sync: {codechef_result.get('status')}")
-    except Exception as e:
-        logger.error(f"CodeChef sync error: {str(e)}")
-    
-    try:
-        leetcode_result = await sync_leetcode_service()
-        logger.info(f"LeetCode sync: {leetcode_result.get('status')}")
-    except Exception as e:
-        logger.error(f"LeetCode sync error: {str(e)}")
+    for platform in platforms:
+        job_id = None
+        try:
+            job_response = supabase.table("sync_jobs").insert({
+                "platform": platform,
+                "status": "running"
+            }).execute()
+            
+            if job_response.data:
+                job_id = job_response.data[0]["id"]
+                logger.info(f"Created job {job_id} for {platform}")
+            
+            if platform == "codeforces":
+                result = await sync_codeforces_service(job_id)
+            elif platform == "codechef":
+                result = await sync_codechef_service(job_id)
+            elif platform == "leetcode":
+                result = await sync_leetcode_service(job_id)
+            
+            logger.info(f"{platform.capitalize()} sync: {result.get('status')}")
+            
+            supabase.table("sync_jobs").update({
+                "status": "success",
+                "completed_at": datetime.now(timezone.utc).isoformat()
+            }).eq("id", job_id).execute()
+            
+        except Exception as e:
+            logger.error(f"{platform.capitalize()} sync error: {str(e)}")
+            if job_id:
+                supabase.table("sync_jobs").update({
+                    "status": "failed",
+                    "error_message": str(e),
+                    "completed_at": datetime.now(timezone.utc).isoformat()
+                }).eq("id", job_id).execute()
     
     logger.info("=== FULL SYNC COMPLETED ===")
+
+
+@router.get("/sync/jobs")
+async def get_sync_jobs():
+    try:
+        response = supabase.table("sync_jobs").select("*").order("started_at", desc=True).limit(20).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching sync jobs: {str(e)}")
 
 
 @router.post("/sync/all")

@@ -549,3 +549,19 @@ BEGIN
     );
 END;
 $$ LANGUAGE plpgsql;
+
+-- Sync Jobs Table
+CREATE TABLE sync_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    completed_at TIMESTAMP WITH TIME ZONE,
+    status TEXT NOT NULL DEFAULT 'running',
+    platform TEXT NOT NULL,
+    total_students INTEGER DEFAULT 0,
+    processed_students INTEGER DEFAULT 0,
+    error_message TEXT
+);
+
+-- Index for faster queries
+CREATE INDEX idx_sync_jobs_status ON sync_jobs(status);
+CREATE INDEX idx_sync_jobs_started_at ON sync_jobs(started_at DESC);
