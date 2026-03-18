@@ -2,7 +2,7 @@ import httpx
 import asyncio
 import re
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from database import supabase
 from typing import Dict, Any, List
 from datetime import datetime, timezone
@@ -483,27 +483,32 @@ async def sync_codechef():
     return await sync_codechef_service()
 
 
+async def run_full_sync():
+    logger.info("=== FULL SYNC STARTED ===")
+    
+    try:
+        codeforces_result = await sync_codeforces_service()
+        logger.info(f"Codeforces sync: {codeforces_result.get('status')}")
+    except Exception as e:
+        logger.error(f"Codeforces sync error: {str(e)}")
+    
+    try:
+        codechef_result = await sync_codechef_service()
+        logger.info(f"CodeChef sync: {codechef_result.get('status')}")
+    except Exception as e:
+        logger.error(f"CodeChef sync error: {str(e)}")
+    
+    try:
+        leetcode_result = await sync_leetcode_service()
+        logger.info(f"LeetCode sync: {leetcode_result.get('status')}")
+    except Exception as e:
+        logger.error(f"LeetCode sync error: {str(e)}")
+    
+    logger.info("=== FULL SYNC COMPLETED ===")
+
+
 @router.post("/sync/all")
 @router.get("/sync/all")
-async def sync_all():
-    logger.info("Starting full sync for all platforms...")
-    
-    results = await asyncio.gather(
-        sync_codeforces_service(),
-        sync_codechef_service(),
-        sync_leetcode_service(),
-        return_exceptions=True
-    )
-    
-    codeforces_result = results[0] if not isinstance(results[0], Exception) else {"status": "error", "error": str(results[0])}
-    codechef_result = results[1] if not isinstance(results[1], Exception) else {"status": "error", "error": str(results[1])}
-    leetcode_result = results[2] if not isinstance(results[2], Exception) else {"status": "error", "error": str(results[2])}
-    
-    return {
-        "message": "Sync completed",
-        "results": {
-            "codeforces": codeforces_result,
-            "codechef": codechef_result,
-            "leetcode": leetcode_result
-        }
-    }
+async def sync_all(background_tasks: BackgroundTasks):
+    background_tasks.add_task(run_full_sync)
+    return {"message": "Sync started in background"}
