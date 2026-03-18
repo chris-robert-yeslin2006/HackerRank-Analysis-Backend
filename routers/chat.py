@@ -69,7 +69,7 @@ async def chat_to_sql(request: ChatRequest):
     """
 
     # List of models to try in order of preference
-    models_to_try = ['gemini-flash-latest']
+    models_to_try = ['gemini-3.1-flash-lite-preview', 'gemini-flash-latest']
     
     sql_query = None
     last_error = None
