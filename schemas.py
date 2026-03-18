@@ -57,6 +57,7 @@ class LeetCodeStats(BaseModel):
     hard_today: Optional[int] = 0
 
 class StudentPlatformUpdate(BaseModel):
+    hackerrank_username: Optional[str] = None
     leetcode_id: Optional[str] = None
     codeforces_id: Optional[str] = None
     codechef_id: Optional[str] = None

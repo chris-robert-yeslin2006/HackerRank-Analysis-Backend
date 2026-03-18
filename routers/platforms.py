@@ -173,14 +173,30 @@ def update_platform_entry(roll_no: str, platform_update: StudentPlatformUpdate):
         if not update_data:
             raise HTTPException(status_code=400, detail="No fields provided for update.")
 
+        student_fields = {}
+        platform_fields = {}
+
+        if "hackerrank_username" in update_data:
+            student_fields["hackerrank_username"] = update_data.pop("hackerrank_username")
+
         if "leetcode_id" in update_data:
             update_data["leetcode_id"] = clean_leetcode_username(update_data["leetcode_id"])
 
-        response = supabase.table("student_platforms").update(update_data).eq("roll_no", roll_no).execute()
+        platform_fields = update_data
 
-        if not response.data:
-            raise HTTPException(status_code=404, detail=f"Student with roll_no {roll_no} not found in platform table.")
+        if student_fields:
+            response = supabase.table("students").update(student_fields).eq("roll_no", roll_no).execute()
+            if not response.data:
+                raise HTTPException(status_code=404, detail=f"Student with roll_no {roll_no} not found.")
 
-        return {"message": "Platform IDs updated successfully", "data": response.data[0]}
+        if platform_fields:
+            response = supabase.table("student_platforms").update(platform_fields).eq("roll_no", roll_no).execute()
+
+            if not response.data:
+                raise HTTPException(status_code=404, detail=f"Student with roll_no {roll_no} not found in platform table.")
+
+        return {"message": "Platform IDs updated successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Update failed: {str(e)}")
