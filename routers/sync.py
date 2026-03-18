@@ -1,32 +1,28 @@
 import httpx
 import asyncio
 import re
+import logging
 from fastapi import APIRouter, HTTPException
 from database import supabase
 from typing import Dict, Any, List
 from datetime import datetime, timezone
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Sync"])
 
 LEETCODE_URL = "https://leetcode.com/graphql"
 
 def clean_leetcode_username(raw_id: str) -> str:
-    """
-    Cleans a raw LeetCode ID by removing URLs, suffixes like '(new)', and trailing slashes.
-    Example: 'https://leetcode.com/u/Bharathvaj77/:' -> 'Bharathvaj77'
-    """
     if not raw_id or not isinstance(raw_id, str):
         return ""
     
-    # Remove trailing slashes and common URL prefixes
     raw_id = raw_id.strip().rstrip('/')
     if '/' in raw_id:
         raw_id = raw_id.split('/')[-1]
     
-    # Remove common suffixes like (new)
     raw_id = raw_id.replace('(new)', '')
-    
-    # Remove non-alphanumeric trailing characters (like : in the user's example)
     raw_id = re.sub(r'[^a-zA-Z0-9_-].*$', '', raw_id)
     
     return raw_id.strip()
@@ -61,7 +57,7 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
     username = clean_leetcode_username(raw_username)
     
     if not username:
-        print(f"Empty or invalid LeetCode ID for student {student.get('roll_no')}")
+        logger.info(f"Empty or invalid LeetCode ID for student {student.get('roll_no')}")
         return
 
     async with semaphore:
@@ -73,7 +69,6 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
         }
 
         try:
-            # Add a small staggered delay
             await asyncio.sleep(0.5) 
 
             r = await client.post(
@@ -84,19 +79,18 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
             )
             
             if r.status_code == 429:
-                print(f"Rate limited for {username}. Retrying later.")
+                logger.warning(f"Rate limited for {username}. Retrying later.")
                 return
 
             r.raise_for_status()
             res_data = r.json()
             
             if "data" not in res_data or not res_data["data"].get("matchedUser"):
-                print(f"User {username} not found on LeetCode.")
+                logger.info(f"User {username} not found on LeetCode.")
                 return
 
             data = res_data["data"]
 
-            # Extract total solved by difficulty
             total_solved = 0
             easy_solved = 0
             medium_solved = 0
@@ -114,7 +108,6 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
                     elif s["difficulty"] == "Hard":
                         hard_solved = s["count"]
 
-            # Fetch existing stats to calculate "today" delta
             existing_resp = supabase.table("leetcode_stats").select("easy_solved, medium_solved, hard_solved, easy_today, medium_today, hard_today, updated_at").eq("roll_no", student["roll_no"]).execute()
             
             easy_today = 0
@@ -125,12 +118,10 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
                 old_stats = existing_resp.data[0]
                 last_updated_str = old_stats.get("updated_at")
                 
-                # Calculate delta from last sync
                 delta_easy = max(0, easy_solved - old_stats.get("easy_solved", 0))
                 delta_medium = max(0, medium_solved - old_stats.get("medium_solved", 0))
                 delta_hard = max(0, hard_solved - old_stats.get("hard_solved", 0))
 
-                # Check if the last update was on the same day (UTC)
                 now_utc = datetime.now(timezone.utc)
                 is_same_day = False
                 if last_updated_str:
@@ -139,22 +130,18 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
                         is_same_day = True
                 
                 if is_same_day:
-                    # If same day, add the new delta to the existing "today" count
                     easy_today = old_stats.get("easy_today", 0) + delta_easy
                     medium_today = old_stats.get("medium_today", 0) + delta_medium
                     hard_today = old_stats.get("hard_today", 0) + delta_hard
                 else:
-                    # If new day, the delta itself becomes the new "today" count
                     easy_today = delta_easy
                     medium_today = delta_medium
                     hard_today = delta_hard
             else:
-                # No previous record, so today's count is the total count
                 easy_today = easy_solved
                 medium_today = medium_solved
                 hard_today = hard_solved
             
-            # Extract rating
             rating = None
             if data["userContestRanking"]:
                 rating = int(data["userContestRanking"]["rating"])
@@ -164,7 +151,6 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
             biweekly_rank = None
             biweekly_solved = None
 
-            # Extract history
             history = data.get("userContestRankingHistory", [])
             if history:
                 for contest in reversed(history):
@@ -184,7 +170,6 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
                     if weekly_rank is not None and biweekly_rank is not None:
                         break
 
-            # Upsert stats to Supabase
             supabase.table("leetcode_stats").upsert({
                 "roll_no": student["roll_no"],
                 "weekly_rank": weekly_rank,
@@ -203,39 +188,42 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
             }).execute()
 
         except httpx.HTTPStatusError as e:
-            print(f"HTTP error for {username}: {e.response.status_code}")
+            logger.error(f"HTTP error for {username}: {e.response.status_code}")
         except Exception as e:
-            print(f"Error fetching data for {username}: {str(e)}")
+            logger.error(f"Error fetching data for {username}: {str(e)}")
 
-@router.post("/sync/leetcode")
-async def sync_leetcode():
+
+async def sync_leetcode_service() -> Dict[str, Any]:
+    logger.info("Starting LeetCode sync...")
     try:
-        # Get students who have a leetcode_id
         response = supabase.rpc("get_students_with_leetcode",{}).execute()
         students = response.data
 
         if not students:
-            return {"message": "No students with LeetCode IDs found"}
+            return {"message": "No students with LeetCode IDs found", "status": "success"}
 
-        # Limit concurrency to 5 simultaneous requests
         semaphore = asyncio.Semaphore(5)
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             tasks = [fetch_user(client, student, semaphore) for student in students]
             await asyncio.gather(*tasks)
 
-        return {"message": f"LeetCode sync completed for {len(students)} students"}
+        logger.info(f"LeetCode sync completed for {len(students)} students")
+        return {"message": f"LeetCode sync completed for {len(students)} students", "status": "success"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Sync failed: {str(e)}")
+        logger.error(f"LeetCode sync failed: {str(e)}")
+        return {"message": f"LeetCode sync failed: {str(e)}", "status": "error", "error": str(e)}
 
-# ==========================================
-# 🔄 Codeforces Sync
-# ==========================================
+
+@router.post("/sync/leetcode")
+async def sync_leetcode():
+    return await sync_leetcode_service()
+
+
 CODEFORCES_API_BASE = "https://codeforces.com/api"
 CF_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 async def fetch_codeforces_user_info(client: httpx.AsyncClient, username: str) -> Dict[str, Any]:
-    """Fetch user info from Codeforces API"""
     try:
         r = await client.get(f"{CODEFORCES_API_BASE}/user.info", params={"handles": username}, headers=CF_HEADERS, timeout=20.0)
         r.raise_for_status()
@@ -243,11 +231,10 @@ async def fetch_codeforces_user_info(client: httpx.AsyncClient, username: str) -
         if data.get("status") == "OK" and data.get("result"):
             return data["result"][0]
     except Exception as e:
-        print(f"Error fetching Codeforces user info for {username}: {e}")
+        logger.error(f"Error fetching Codeforces user info for {username}: {e}")
     return {}
 
 async def fetch_codeforces_rating(client: httpx.AsyncClient, username: str) -> List[Dict[str, Any]]:
-    """Fetch user's rating history"""
     try:
         r = await client.get(f"{CODEFORCES_API_BASE}/user.rating", params={"handle": username}, headers=CF_HEADERS, timeout=20.0)
         r.raise_for_status()
@@ -255,11 +242,10 @@ async def fetch_codeforces_rating(client: httpx.AsyncClient, username: str) -> L
         if data.get("status") == "OK":
             return data.get("result", [])
     except Exception as e:
-        print(f"Error fetching Codeforces rating for {username}: {e}")
+        logger.error(f"Error fetching Codeforces rating for {username}: {e}")
     return []
 
 async def fetch_codeforces_submissions(client: httpx.AsyncClient, username: str) -> List[Dict[str, Any]]:
-    """Fetch user's submissions for problem stats"""
     try:
         r = await client.get(f"{CODEFORCES_API_BASE}/user.status", params={"handle": username}, headers=CF_HEADERS, timeout=30.0)
         r.raise_for_status()
@@ -267,11 +253,10 @@ async def fetch_codeforces_submissions(client: httpx.AsyncClient, username: str)
         if data.get("status") == "OK":
             return data.get("result", [])
     except Exception as e:
-        print(f"Error fetching Codeforces submissions for {username}: {e}")
+        logger.error(f"Error fetching Codeforces submissions for {username}: {e}")
     return []
 
 async def fetch_codeforces_contest(client: httpx.AsyncClient, contest_id: int, username: str) -> Dict[str, Any]:
-    """Fetch user's result in a specific contest"""
     try:
         r = await client.get(f"{CODEFORCES_API_BASE}/contest.standings", params={"contestId": contest_id, "handles": username, "includeTeamParticipants": "false"}, timeout=20.0)
         r.raise_for_status()
@@ -279,11 +264,10 @@ async def fetch_codeforces_contest(client: httpx.AsyncClient, contest_id: int, u
         if data.get("status") == "OK" and data.get("result", {}).get("rows"):
             return data["result"]["rows"][0]
     except Exception as e:
-        print(f"Error fetching Codeforces contest {contest_id}: {e}")
+        logger.error(f"Error fetching Codeforces contest {contest_id}: {e}")
     return {}
 
 async def fetch_recent_contests(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
-    """Fetch the last 5 Codeforces contests"""
     try:
         r = await client.get(f"{CODEFORCES_API_BASE}/contest.list", params={"from": 1, "count": 5}, headers=CF_HEADERS, timeout=20.0)
         r.raise_for_status()
@@ -292,10 +276,9 @@ async def fetch_recent_contests(client: httpx.AsyncClient) -> List[Dict[str, Any
             contests = data.get("result", [])
             return [{"id": c.get("id"), "name": c.get("name")} for c in reversed(contests)]
     except Exception as e:
-        print(f"Error fetching recent contests: {e}")
+        logger.error(f"Error fetching recent contests: {e}")
     return []
 
-# Store globally
 _recent_contests_cache = []
 
 async def get_recent_contests(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
@@ -307,16 +290,16 @@ async def get_recent_contests(client: httpx.AsyncClient) -> List[Dict[str, Any]]
 async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, Any], semaphore: asyncio.Semaphore):
     username = student.get("codeforces_id", "").strip()
     if not username:
-        print(f"Empty Codeforces ID for student {student.get('roll_no')}")
+        logger.info(f"Empty Codeforces ID for student {student.get('roll_no')}")
         return
 
     async with semaphore:
         try:
-            await asyncio.sleep(0.3)  # Minimal delay
+            await asyncio.sleep(0.3)
 
             user_info = await fetch_codeforces_user_info(client, username)
             if not user_info:
-                print(f"⚠️ Could not fetch Codeforces data for {username} (may not exist or API blocked)")
+                logger.warning(f"Could not fetch Codeforces data for {username}")
                 return
 
             rating_history = await fetch_codeforces_rating(client, username)
@@ -356,59 +339,65 @@ async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, An
                 "updated_at": "now()"
             }).execute()
 
-            print(f"✅ Updated Codeforces: {student.get('roll_no')} - Rating: {current_rating}")
+            logger.info(f"Updated Codeforces: {student.get('roll_no')} - Rating: {current_rating}")
 
         except Exception as e:
-            print(f"❌ Error fetching Codeforces data for {username}: {str(e)}")
+            logger.error(f"Error fetching Codeforces data for {username}: {str(e)}")
 
-@router.post("/sync/codeforces")
-async def sync_codeforces():
+
+async def sync_codeforces_service() -> Dict[str, Any]:
+    logger.info("Starting Codeforces sync...")
     try:
         global _recent_contests_cache
-        _recent_contests_cache = []  # Clear cache to get fresh contests
+        _recent_contests_cache = []
         
         response = supabase.rpc("get_students_with_codeforces",{}).execute()
         students = response.data
 
         if not students:
-            return {"message": "No students with Codeforces IDs found"}
+            return {"message": "No students with Codeforces IDs found", "status": "success"}
 
-        semaphore = asyncio.Semaphore(25)  # High concurrency
+        semaphore = asyncio.Semaphore(25)
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             tasks = [fetch_codeforces_data(client, student, semaphore) for student in students]
             await asyncio.gather(*tasks)
 
-        return {"message": f"Codeforces sync completed for {len(students)} students"}
+        logger.info(f"Codeforces sync completed for {len(students)} students")
+        return {"message": f"Codeforces sync completed for {len(students)} students", "status": "success"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Sync failed: {str(e)}")
+        logger.error(f"Codeforces sync failed: {str(e)}")
+        return {"message": f"Codeforces sync failed: {str(e)}", "status": "error", "error": str(e)}
 
-# ==========================================
-# 🔄 CodeChef Sync
-# ==========================================
+
+@router.post("/sync/codeforces")
+async def sync_codeforces():
+    return await sync_codeforces_service()
+
+
 CODECHEF_API_URL = "https://code-chef-bot.onrender.com/handle"
 
 async def fetch_codechef_data(client: httpx.AsyncClient, student: Dict[str, Any], semaphore: asyncio.Semaphore):
     username = student.get("codechef_id", "").strip()
     if not username:
-        print(f"Empty CodeChef ID for student {student.get('roll_no')}")
+        logger.info(f"Empty CodeChef ID for student {student.get('roll_no')}")
         return
 
     async with semaphore:
         try:
-            await asyncio.sleep(0.3)  # Minimal delay
+            await asyncio.sleep(0.3)
 
             r = await client.get(f"{CODECHEF_API_URL}/{username}", timeout=20.0)
             
             if r.status_code == 404:
-                print(f"⚠️ CodeChef user not found: {username}")
+                logger.warning(f"CodeChef user not found: {username}")
                 return
             
             r.raise_for_status()
             data = r.json()
             
             if not data or not data.get("currentRating"):
-                print(f"⚠️ No rating data for CodeChef user: {username}")
+                logger.warning(f"No rating data for CodeChef user: {username}")
                 return
 
             current_rating = data.get("currentRating")
@@ -461,26 +450,60 @@ async def fetch_codechef_data(client: httpx.AsyncClient, student: Dict[str, Any]
                 "updated_at": "now()"
             }).execute()
 
-            print(f"✅ Updated CodeChef: {student.get('roll_no')} - Rating: {current_rating}")
+            logger.info(f"Updated CodeChef: {student.get('roll_no')} - Rating: {current_rating}")
                 
         except Exception as e:
-            print(f"❌ Error fetching CodeChef data for {username}: {str(e)}")
+            logger.error(f"Error fetching CodeChef data for {username}: {str(e)}")
 
-@router.post("/sync/codechef")
-async def sync_codechef():
+
+async def sync_codechef_service() -> Dict[str, Any]:
+    logger.info("Starting CodeChef sync...")
     try:
         response = supabase.rpc("get_students_with_codechef",{}).execute()
         students = response.data
 
         if not students:
-            return {"message": "No students with CodeChef IDs found"}
+            return {"message": "No students with CodeChef IDs found", "status": "success"}
 
-        semaphore = asyncio.Semaphore(25)  # High concurrency
+        semaphore = asyncio.Semaphore(25)
 
         async with httpx.AsyncClient(timeout=20.0) as client:
             tasks = [fetch_codechef_data(client, student, semaphore) for student in students]
             await asyncio.gather(*tasks)
 
-        return {"message": f"CodeChef sync completed for {len(students)} students"}
+        logger.info(f"CodeChef sync completed for {len(students)} students")
+        return {"message": f"CodeChef sync completed for {len(students)} students", "status": "success"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Sync failed: {str(e)}")
+        logger.error(f"CodeChef sync failed: {str(e)}")
+        return {"message": f"CodeChef sync failed: {str(e)}", "status": "error", "error": str(e)}
+
+
+@router.post("/sync/codechef")
+async def sync_codechef():
+    return await sync_codechef_service()
+
+
+@router.post("/sync/all")
+@router.get("/sync/all")
+async def sync_all():
+    logger.info("Starting full sync for all platforms...")
+    
+    results = await asyncio.gather(
+        sync_codeforces_service(),
+        sync_codechef_service(),
+        sync_leetcode_service(),
+        return_exceptions=True
+    )
+    
+    codeforces_result = results[0] if not isinstance(results[0], Exception) else {"status": "error", "error": str(results[0])}
+    codechef_result = results[1] if not isinstance(results[1], Exception) else {"status": "error", "error": str(results[1])}
+    leetcode_result = results[2] if not isinstance(results[2], Exception) else {"status": "error", "error": str(results[2])}
+    
+    return {
+        "message": "Sync completed",
+        "results": {
+            "codeforces": codeforces_result,
+            "codechef": codechef_result,
+            "leetcode": leetcode_result
+        }
+    }
