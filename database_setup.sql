@@ -139,7 +139,10 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- 10. RPC — LeetCode Analytics for Frontend
-CREATE OR REPLACE FUNCTION get_leetcode_analytics()
+-- ==========================================
+-- LeetCode Analytics (with pagination support)
+-- ==========================================
+CREATE OR REPLACE FUNCTION get_leetcode_analytics(p_limit INT DEFAULT 1000, p_offset INT DEFAULT 0)
 RETURNS TABLE (
     roll_no TEXT,
     name TEXT,
@@ -180,7 +183,9 @@ BEGIN
         l.medium_today,
         l.hard_today
     FROM students s
-    JOIN leetcode_stats l ON s.roll_no = l.roll_no;
+    INNER JOIN leetcode_stats l ON s.roll_no = l.roll_no
+    ORDER BY s.year, s.department, s.section
+    LIMIT p_limit OFFSET p_offset;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -376,6 +381,23 @@ RETURNS TABLE (
 ) AS $$
 BEGIN
     RETURN QUERY
+-- ==========================================
+-- Codeforces Analytics (with pagination support)
+-- ==========================================
+CREATE OR REPLACE FUNCTION get_codeforces_analytics(p_limit INT DEFAULT 1000, p_offset INT DEFAULT 0)
+RETURNS TABLE (
+    roll_no TEXT,
+    name TEXT,
+    department TEXT,
+    section TEXT,
+    year INT,
+    contest_name TEXT,
+    problems_solved INT,
+    rating INT,
+    badge TEXT
+) AS $$
+BEGIN
+    RETURN QUERY
     SELECT 
         s.roll_no,
         s.name,
@@ -387,7 +409,9 @@ BEGIN
         cf.current_rating,
         cf.rank
     FROM students s
-    JOIN codeforces_stats cf ON s.roll_no = cf.roll_no;
+    INNER JOIN codeforces_stats cf ON s.roll_no = cf.roll_no
+    ORDER BY s.year, s.department, s.section
+    LIMIT p_limit OFFSET p_offset;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -460,6 +484,24 @@ RETURNS TABLE (
 ) AS $$
 BEGIN
     RETURN QUERY
+-- ==========================================
+-- CodeChef Analytics (with pagination support)
+-- ==========================================
+CREATE OR REPLACE FUNCTION get_codechef_analytics(p_limit INT DEFAULT 1000, p_offset INT DEFAULT 0)
+RETURNS TABLE (
+    roll_no TEXT,
+    name TEXT,
+    department TEXT,
+    section TEXT,
+    year INT,
+    contest_name TEXT,
+    contest_rank INT,
+    problems_solved INT,
+    rating INT,
+    star INT
+) AS $$
+BEGIN
+    RETURN QUERY
     SELECT 
         s.roll_no,
         s.name,
@@ -472,7 +514,9 @@ BEGIN
         cc.current_rating,
         cc.stars
     FROM students s
-    JOIN codechef_stats cc ON s.roll_no = cc.roll_no;
+    INNER JOIN codechef_stats cc ON s.roll_no = cc.roll_no
+    ORDER BY s.year, s.department, s.section
+    LIMIT p_limit OFFSET p_offset;
 END;
 $$ LANGUAGE plpgsql;
 

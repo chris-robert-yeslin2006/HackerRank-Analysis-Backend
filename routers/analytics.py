@@ -87,6 +87,26 @@ def get_platform_department_leaderboard(platform: str = "hackerrank"):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error fetching department leaderboard: {str(e)}")
 
+def fetch_all_with_pagination(rpc_name: str, page_size: int = 1000):
+    """Fetch all data from an RPC using pagination."""
+    all_data = []
+    offset = 0
+    
+    while True:
+        try:
+            response = supabase.rpc(rpc_name, {"p_limit": page_size, "p_offset": offset}).execute()
+            data = response.data if response.data else []
+            all_data.extend(data)
+            
+            if len(data) < page_size:
+                break
+            offset += page_size
+        except Exception as e:
+            raise e
+    
+    return all_data
+
+
 @router.get("/analytics/leetcode")
 def get_leetcode_analytics():
     cache_key = "leetcode_analytics"
@@ -95,8 +115,7 @@ def get_leetcode_analytics():
         return cached
     
     try:
-        response = supabase.rpc("get_leetcode_analytics", {}).execute()
-        data = response.data
+        data = fetch_all_with_pagination("get_leetcode_analytics")
         set_cached(cache_key, data)
         return data
     except Exception as e:
@@ -110,8 +129,7 @@ def get_codeforces_analytics():
         return cached
     
     try:
-        response = supabase.rpc("get_codeforces_analytics", {}).execute()
-        data = response.data
+        data = fetch_all_with_pagination("get_codeforces_analytics")
         set_cached(cache_key, data)
         return data
     except Exception as e:
@@ -125,8 +143,7 @@ def get_codechef_analytics():
         return cached
     
     try:
-        response = supabase.rpc("get_codechef_analytics", {}).execute()
-        data = response.data
+        data = fetch_all_with_pagination("get_codechef_analytics")
         set_cached(cache_key, data)
         return data
     except Exception as e:
