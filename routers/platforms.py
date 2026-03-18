@@ -195,6 +195,9 @@ def update_platform_entry(roll_no: str, platform_update: StudentPlatformUpdate):
             if not response.data:
                 raise HTTPException(status_code=404, detail=f"Student with roll_no {roll_no} not found in platform table.")
 
+        invalidate_cache("platforms")
+        invalidate_cache("students")
+        
         return {"message": "Platform IDs updated successfully"}
     except HTTPException:
         raise

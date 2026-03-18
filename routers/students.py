@@ -154,6 +154,8 @@ def update_student(student_id: str, student_update: StudentUpdate):
         
         if not response.data:
             raise HTTPException(status_code=404, detail="Student not found")
+        
+        invalidate_cache("students")
             
         return {"message": "Student updated successfully", "data": response.data[0]}
     except Exception as e:
@@ -166,6 +168,8 @@ def delete_student(student_id: str):
         
         if not response.data:
             raise HTTPException(status_code=404, detail="Student not found")
+        
+        invalidate_cache("students")
             
         return {"message": "Student deleted successfully"}
     except Exception as e:
@@ -210,6 +214,9 @@ def update_student_full(student_update: StudentFullUpdate):
                 "roll_no": roll_no,
                 **platform_fields
             }).execute()
+        
+        invalidate_cache("students")
+        invalidate_cache("platforms")
         
         return {"message": "Student updated successfully", "roll_no": roll_no}
     except Exception as e:
