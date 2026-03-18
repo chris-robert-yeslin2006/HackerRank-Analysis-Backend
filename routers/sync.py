@@ -25,6 +25,29 @@ def update_job_progress(job_id: str, processed: int, total: int):
     except Exception as e:
         logger.error(f"Failed to update job progress: {e}")
 
+
+async def retry_with_backoff(func, *args, max_retries=3, **kwargs):
+    """Retry a function with exponential backoff for network/5xx errors."""
+    retryable_exceptions = (httpx.NetworkError, httpx.TimeoutException, httpx.HTTPStatusError)
+    
+    for attempt in range(max_retries):
+        try:
+            return await func(*args, **kwargs)
+        except retryable_exceptions as e:
+            if attempt < max_retries - 1:
+                delay = 2 ** attempt
+                logger.warning(f"Retry {attempt + 1}/{max_retries} after {delay}s: {str(e)}")
+                await asyncio.sleep(delay)
+            else:
+                logger.error(f"Retry failed after {max_retries} attempts: {str(e)}")
+                raise
+        except Exception as e:
+            if isinstance(e, httpx.HTTPStatusError):
+                if e.response.status_code == 404:
+                    raise
+            logger.error(f"Non-retryable error: {str(e)}")
+            raise
+
 def clean_leetcode_username(raw_id: str) -> str:
     if not raw_id or not isinstance(raw_id, str):
         return ""
@@ -72,29 +95,28 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
         return
 
     async with semaphore:
-        variables = {"username": username}
-        headers = {
-            'Content-Type': 'application/json',
-            'Referer': f'https://leetcode.com/u/{username}/',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-
         try:
             await asyncio.sleep(0.5) 
 
-            r = await client.post(
-                LEETCODE_URL,
-                json={"query": QUERY, "variables": variables},
-                headers=headers,
-                timeout=20.0
-            )
-            
-            if r.status_code == 429:
-                logger.warning(f"Rate limited for {username}. Retrying later.")
-                return
+            async def leetcode_api_call():
+                variables = {"username": username}
+                headers = {
+                    'Content-Type': 'application/json',
+                    'Referer': f'https://leetcode.com/u/{username}/',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }
+                r = await client.post(
+                    LEETCODE_URL,
+                    json={"query": QUERY, "variables": variables},
+                    headers=headers,
+                    timeout=20.0
+                )
+                if r.status_code == 429:
+                    raise httpx.HTTPStatusError("Rate limited", request=r.request, response=r)
+                r.raise_for_status()
+                return r.json()
 
-            r.raise_for_status()
-            res_data = r.json()
+            res_data = await retry_with_backoff(leetcode_api_call, max_retries=3)
             
             if "data" not in res_data or not res_data["data"].get("matchedUser"):
                 logger.info(f"User {username} not found on LeetCode.")
@@ -245,26 +267,34 @@ CODEFORCES_API_BASE = "https://codeforces.com/api"
 CF_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 async def fetch_codeforces_user_info(client: httpx.AsyncClient, username: str) -> Dict[str, Any]:
-    try:
+    async def api_call():
         r = await client.get(f"{CODEFORCES_API_BASE}/user.info", params={"handles": username}, headers=CF_HEADERS, timeout=20.0)
         r.raise_for_status()
         data = r.json()
         if data.get("status") == "OK" and data.get("result"):
             return data["result"][0]
+        return {}
+    
+    try:
+        return await retry_with_backoff(api_call, max_retries=3)
     except Exception as e:
         logger.error(f"Error fetching Codeforces user info for {username}: {e}")
-    return {}
+        return {}
 
 async def fetch_codeforces_rating(client: httpx.AsyncClient, username: str) -> List[Dict[str, Any]]:
-    try:
+    async def api_call():
         r = await client.get(f"{CODEFORCES_API_BASE}/user.rating", params={"handle": username}, headers=CF_HEADERS, timeout=20.0)
         r.raise_for_status()
         data = r.json()
         if data.get("status") == "OK":
             return data.get("result", [])
+        return []
+    
+    try:
+        return await retry_with_backoff(api_call, max_retries=3)
     except Exception as e:
         logger.error(f"Error fetching Codeforces rating for {username}: {e}")
-    return []
+        return []
 
 async def fetch_codeforces_submissions(client: httpx.AsyncClient, username: str) -> List[Dict[str, Any]]:
     try:
@@ -416,14 +446,14 @@ async def fetch_codechef_data(client: httpx.AsyncClient, student: Dict[str, Any]
         try:
             await asyncio.sleep(0.3)
 
-            r = await client.get(f"{CODECHEF_API_URL}/{username}", timeout=20.0)
-            
-            if r.status_code == 404:
-                logger.warning(f"CodeChef user not found: {username}")
-                return
-            
-            r.raise_for_status()
-            data = r.json()
+            async def codechef_api_call():
+                r = await client.get(f"{CODECHEF_API_URL}/{username}", timeout=20.0)
+                if r.status_code == 404:
+                    raise httpx.HTTPStatusError("User not found", request=r.request, response=r)
+                r.raise_for_status()
+                return r.json()
+
+            data = await retry_with_backoff(codechef_api_call, max_retries=3)
             
             if not data or not data.get("currentRating"):
                 logger.warning(f"No rating data for CodeChef user: {username}")
