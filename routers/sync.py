@@ -26,7 +26,7 @@ def update_job_progress(job_id: str, processed: int, total: int):
         logger.error(f"Failed to update job progress: {e}")
 
 
-async def retry_with_backoff(func, *args, max_retries=3, **kwargs):
+async def retry_with_backoff(func, *args, max_retries=3, base_delay=1.0, **kwargs):
     """Retry a function with exponential backoff for network/5xx errors."""
     retryable_exceptions = (httpx.NetworkError, httpx.TimeoutException, httpx.HTTPStatusError)
     
@@ -35,7 +35,7 @@ async def retry_with_backoff(func, *args, max_retries=3, **kwargs):
             return await func(*args, **kwargs)
         except retryable_exceptions as e:
             if attempt < max_retries - 1:
-                delay = 2 ** attempt
+                delay = base_delay * (2 ** attempt)
                 logger.warning(f"Retry {attempt + 1}/{max_retries} after {delay}s: {str(e)}")
                 await asyncio.sleep(delay)
             else:
@@ -469,16 +469,18 @@ async def fetch_codechef_data(client: httpx.AsyncClient, student: Dict[str, Any]
 
     async with semaphore:
         try:
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.5)
 
             async def codechef_api_call():
-                r = await client.get(f"{CODECHEF_API_URL}/{username}", timeout=20.0)
+                r = await client.get(f"{CODECHEF_API_URL}/{username}", timeout=30.0)
                 if r.status_code == 404:
                     raise httpx.HTTPStatusError("User not found", request=r.request, response=r)
+                if r.status_code == 429:
+                    raise httpx.HTTPStatusError("Rate limited", request=r.request, response=r)
                 r.raise_for_status()
                 return r.json()
 
-            data = await retry_with_backoff(codechef_api_call, max_retries=3)
+            data = await retry_with_backoff(codechef_api_call, max_retries=5, base_delay=2.0)
             
             if not data or not data.get("currentRating"):
                 logger.warning(f"No rating data for CodeChef user: {username}")
@@ -560,10 +562,10 @@ async def sync_codechef_service(job_id: Optional[str] = None) -> Dict[str, Any]:
         
         processed_count = 0
 
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             for batch_num, batch in enumerate(batches, 1):
                 logger.info(f"Processing batch {batch_num}/{len(batches)} ({len(batch)} students)")
-                semaphore = asyncio.Semaphore(25)
+                semaphore = asyncio.Semaphore(5)
                 
                 tasks = [fetch_codechef_data(client, student, semaphore) for student in batch]
                 await asyncio.gather(*tasks)
@@ -572,7 +574,7 @@ async def sync_codechef_service(job_id: Optional[str] = None) -> Dict[str, Any]:
                 if job_id:
                     update_job_progress(job_id, processed_count, total)
                 
-                await asyncio.sleep(1)
+                await asyncio.sleep(5)
 
         logger.info(f"CodeChef sync completed for {total} students")
         return {"message": f"CodeChef sync completed for {total} students", "status": "success"}
