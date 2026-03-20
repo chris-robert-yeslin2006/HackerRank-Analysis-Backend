@@ -23,6 +23,9 @@ class StudentUpdate(BaseModel):
     section: Optional[str] = None
     year: Optional[int] = None
     hackerrank_username: Optional[str] = None
+    leetcode_id: Optional[str] = None
+    codeforces_id: Optional[str] = None
+    codechef_id: Optional[str] = None
 
 class LeaderboardEntryCreate(BaseModel):
     contest_name: str

@@ -157,29 +157,44 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
                 old_stats = existing_resp.data[0]
                 last_updated_str = old_stats.get("updated_at")
                 
-                delta_easy = max(0, easy_solved - old_stats.get("easy_solved", 0))
-                delta_medium = max(0, medium_solved - old_stats.get("medium_solved", 0))
-                delta_hard = max(0, hard_solved - old_stats.get("hard_solved", 0))
+                old_easy = old_stats.get("easy_solved", 0)
+                old_medium = old_stats.get("medium_solved", 0)
+                old_hard = old_stats.get("hard_solved", 0)
+                old_easy_today = old_stats.get("easy_today", 0) if old_stats.get("easy_today") is not None else old_easy
+                old_medium_today = old_stats.get("medium_today", 0) if old_stats.get("medium_today") is not None else old_medium
+                old_hard_today = old_stats.get("hard_today", 0) if old_stats.get("hard_today") is not None else old_hard
+                
+                delta_easy = max(0, easy_solved - old_easy)
+                delta_medium = max(0, medium_solved - old_medium)
+                delta_hard = max(0, hard_solved - old_hard)
 
                 now_utc = datetime.now(timezone.utc)
                 is_same_day = False
                 if last_updated_str:
-                    last_updated_dt = datetime.fromisoformat(last_updated_str.replace('Z', '+00:00'))
-                    if last_updated_dt.date() == now_utc.date():
-                        is_same_day = True
+                    try:
+                        last_updated_dt = datetime.fromisoformat(last_updated_str.replace('Z', '+00:00'))
+                        is_same_day = last_updated_dt.date() == now_utc.date()
+                    except:
+                        is_same_day = False
                 
                 if is_same_day:
-                    easy_today = old_stats.get("easy_today", 0) + delta_easy
-                    medium_today = old_stats.get("medium_today", 0) + delta_medium
-                    hard_today = old_stats.get("hard_today", 0) + delta_hard
+                    easy_today = old_easy_today + delta_easy
+                    medium_today = old_medium_today + delta_medium
+                    hard_today = old_hard_today + delta_hard
                 else:
                     easy_today = delta_easy
                     medium_today = delta_medium
                     hard_today = delta_hard
+                
+                print(f"[{username}] OLD: easy={old_easy}, medium={old_medium}, hard={old_hard}, today_e={old_easy_today}, today_m={old_medium_today}, today_h={old_hard_today}")
+                print(f"[{username}] NEW: easy={easy_solved}, medium={medium_solved}, hard={hard_solved}")
+                print(f"[{username}] DELTA: easy={delta_easy}, medium={delta_medium}, hard={delta_hard}, same_day={is_same_day}")
+                print(f"[{username}] TODAY: easy={easy_today}, medium={medium_today}, hard={hard_today}")
             else:
                 easy_today = easy_solved
                 medium_today = medium_solved
                 hard_today = hard_solved
+                print(f"[{username}] NEW USER - TODAY = TOTAL: easy={easy_today}, medium={medium_today}, hard={hard_today}")
             
             rating = None
             if data["userContestRanking"]:

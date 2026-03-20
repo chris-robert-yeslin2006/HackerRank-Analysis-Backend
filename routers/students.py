@@ -150,6 +150,10 @@ def update_student(roll_no: str, student_update: StudentUpdate):
         if not data:
             raise HTTPException(status_code=400, detail="No fields provided to update")
 
+        existing = supabase.table("students").select("roll_no").eq("roll_no", roll_no).execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Student not found")
+
         student_fields = {}
         platform_fields = {}
 
@@ -164,9 +168,7 @@ def update_student(roll_no: str, student_update: StudentUpdate):
                     platform_fields[key] = value
 
         if student_fields:
-            student_response = supabase.table("students").update(student_fields).eq("roll_no", roll_no).execute()
-            if not student_response.data:
-                raise HTTPException(status_code=404, detail="Student not found")
+            supabase.table("students").update(student_fields).eq("roll_no", roll_no).execute()
         
         if platform_fields:
             supabase.table("student_platforms").upsert({
@@ -178,6 +180,8 @@ def update_student(roll_no: str, student_update: StudentUpdate):
         invalidate_cache("platforms")
             
         return {"message": "Student updated successfully", "roll_no": roll_no}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
