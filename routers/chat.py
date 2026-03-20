@@ -63,6 +63,7 @@ async def chat_to_sql(request: ChatRequest):
     4. Use the table and column names exactly as defined in the schema.
     5. For complex analytics, prefer joining tables on roll_no or username as specified.
     6. If the request is not related to the database, return "INVALID".
+    7. DEFAULT BEHAVIOR FOR DATES: Every query should automatically include a filter to ensure date/timestamp columns are NOT NULL (e.g., `contest_date IS NOT NULL`). If and ONLY if the user explicitly asks for null dates, then change the filter to `IS NULL` for those records.
     
     USER REQUEST:
     {request.text}
