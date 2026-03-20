@@ -2,6 +2,7 @@ import httpx
 import asyncio
 import re
 import logging
+import time
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from database import supabase
 from typing import Dict, Any, List, Optional
@@ -334,12 +335,16 @@ async def fetch_codeforces_contest(client: httpx.AsyncClient, contest_id: int, u
 
 async def fetch_recent_contests(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
     try:
-        r = await client.get(f"{CODEFORCES_API_BASE}/contest.list", params={"from": 1, "count": 5}, headers=CF_HEADERS, timeout=20.0)
+        r = await client.get(f"{CODEFORCES_API_BASE}/contest.list", headers=CF_HEADERS, timeout=20.0)
         r.raise_for_status()
         data = r.json()
         if data.get("status") == "OK":
             contests = data.get("result", [])
-            return [{"id": c.get("id"), "name": c.get("name")} for c in reversed(contests)]
+            current_time = int(time.time())
+            finished_contests = [c for c in contests if c.get("startTimeSeconds", 0) < current_time]
+            recent_contests = [{"id": c.get("id"), "name": c.get("name"), "startTime": c.get("startTimeSeconds")} for c in finished_contests[:5]]
+            print("Recent 5 FINISHED Codeforces contests (with dates):", recent_contests)
+            return recent_contests
     except Exception as e:
         logger.error(f"Error fetching recent contests: {e}")
     return []
@@ -352,7 +357,7 @@ async def get_recent_contests(client: httpx.AsyncClient) -> List[Dict[str, Any]]
         _recent_contests_cache = await fetch_recent_contests(client)
     return _recent_contests_cache
 
-async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, Any], semaphore: asyncio.Semaphore):
+async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, Any], semaphore: asyncio.Semaphore, recent_contests: List[Dict[str, Any]]):
     username = student.get("codeforces_id", "").strip()
     if not username:
         logger.info(f"Empty Codeforces ID for student {student.get('roll_no')}")
@@ -376,7 +381,6 @@ async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, An
 
             total_contests = len(rating_history)
             
-            recent_contests = await get_recent_contests(client)
             attended_contests = []
             
             for contest in recent_contests:
@@ -390,19 +394,21 @@ async def fetch_codeforces_data(client: httpx.AsyncClient, student: Dict[str, An
                         })
                         break
 
-            contest_name = attended_contests[0]["contest"] if attended_contests else None
-
-            supabase.table("codeforces_stats").upsert({
+            upsert_data = {
                 "roll_no": student["roll_no"],
                 "current_rating": current_rating,
                 "max_rating": max_rating,
                 "rank": rank,
                 "contribution": contribution,
                 "total_contests": total_contests,
-                "contest_name": contest_name,
-                "rating_changes": attended_contests,
                 "updated_at": "now()"
-            }).execute()
+            }
+            
+            if attended_contests:
+                upsert_data["contest_name"] = attended_contests[0]["contest"]
+                upsert_data["rating_changes"] = attended_contests
+
+            supabase.table("codeforces_stats").upsert(upsert_data).execute()
 
             logger.info(f"Updated Codeforces: {student.get('roll_no')} - Rating: {current_rating}")
 
@@ -434,11 +440,13 @@ async def sync_codeforces_service(job_id: Optional[str] = None) -> Dict[str, Any
         processed_count = 0
 
         async with httpx.AsyncClient(timeout=30.0) as client:
+            recent_contests = await fetch_recent_contests(client)
+            
             for batch_num, batch in enumerate(batches, 1):
                 logger.info(f"Processing batch {batch_num}/{len(batches)} ({len(batch)} students)")
                 semaphore = asyncio.Semaphore(25)
                 
-                tasks = [fetch_codeforces_data(client, student, semaphore) for student in batch]
+                tasks = [fetch_codeforces_data(client, student, semaphore, recent_contests) for student in batch]
                 await asyncio.gather(*tasks)
                 
                 processed_count += len(batch)

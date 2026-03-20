@@ -142,22 +142,42 @@ async def add_students_bulk(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Bulk upload failed: {str(e)}")
 
-@router.patch("/students/{student_id}")
-def update_student(student_id: str, student_update: StudentUpdate):
+@router.patch("/students/{roll_no}")
+def update_student(roll_no: str, student_update: StudentUpdate):
     try:
-        update_data = student_update.model_dump(exclude_unset=True)
+        data = student_update.model_dump(exclude_unset=True)
         
-        if not update_data:
+        if not data:
             raise HTTPException(status_code=400, detail="No fields provided to update")
 
-        response = supabase.table("students").update(update_data).eq("id", student_id).execute()
+        student_fields = {}
+        platform_fields = {}
+
+        for key, value in data.items():
+            if key in ["name", "department", "section", "year", "hackerrank_username"]:
+                if value is not None:
+                    student_fields[key] = value
+            elif key in ["leetcode_id", "codeforces_id", "codechef_id"]:
+                if key == "leetcode_id" and value:
+                    value = clean_leetcode_username(value)
+                if value is not None:
+                    platform_fields[key] = value
+
+        if student_fields:
+            student_response = supabase.table("students").update(student_fields).eq("roll_no", roll_no).execute()
+            if not student_response.data:
+                raise HTTPException(status_code=404, detail="Student not found")
         
-        if not response.data:
-            raise HTTPException(status_code=404, detail="Student not found")
+        if platform_fields:
+            supabase.table("student_platforms").upsert({
+                "roll_no": roll_no,
+                **platform_fields
+            }).execute()
         
         invalidate_cache("students")
+        invalidate_cache("platforms")
             
-        return {"message": "Student updated successfully", "data": response.data[0]}
+        return {"message": "Student updated successfully", "roll_no": roll_no}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -184,44 +204,3 @@ def get_student_by_roll(roll_no: str):
         return response.data[0]
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-@router.put("/students/full")
-def update_student_full(student_update: StudentFullUpdate):
-    try:
-        data = student_update.model_dump(exclude_unset=True)
-        roll_no = data.pop("roll_no")
-        
-        student_fields = {}
-        platform_fields = {}
-        
-        for key, value in data.items():
-            if key in ["name", "department", "section", "year", "hackerrank_username"]:
-                if value is not None:
-                    student_fields[key] = value
-            elif key in ["leetcode_id", "codeforces_id", "codechef_id"]:
-                if key == "leetcode_id" and value:
-                    value = clean_leetcode_username(value)
-                if value is not None:
-                    platform_fields[key] = value
-        
-        if student_fields:
-            student_response = supabase.table("students").update(student_fields).eq("roll_no", roll_no).execute()
-            if not student_response.data:
-                raise HTTPException(status_code=404, detail="Student not found")
-        
-        if platform_fields:
-            platform_response = supabase.table("student_platforms").upsert({
-                "roll_no": roll_no,
-                **platform_fields
-            }).execute()
-        
-        invalidate_cache("students")
-        invalidate_cache("platforms")
-        
-        return {"message": "Student updated successfully", "roll_no": roll_no}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@router.patch("/students/full")
-def patch_student_full(student_update: StudentFullUpdate):
-    return update_student_full(student_update)
