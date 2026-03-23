@@ -51,13 +51,13 @@ def get_department_leaderboard(platform: str = "hackerrank"):
     
     try:
         if platform.lower() == "leetcode":
-            response = supabase.rpc("get_leetcode_analytics", {}).execute()
+            response = supabase.rpc("get_leetcode_analytics", {"p_limit": 10000, "p_offset": 0}).execute()
             data = response.data
         elif platform.lower() == "codeforces":
-            response = supabase.rpc("get_codeforces_analytics", {}).execute()
+            response = supabase.rpc("get_codeforces_analytics", {"p_limit": 10000, "p_offset": 0}).execute()
             data = response.data
         elif platform.lower() == "codechef":
-            response = supabase.rpc("get_codechef_analytics", {}).execute()
+            response = supabase.rpc("get_codechef_analytics", {"p_limit": 10000, "p_offset": 0}).execute()
             data = response.data
         else:
             response = supabase.rpc("get_platform_department_leaderboard", {"p_platform": platform.lower()}).execute()
