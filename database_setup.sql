@@ -231,7 +231,7 @@ BEGIN
         JOIN student_platforms sp ON s.roll_no = sp.roll_no
         LEFT JOIN leetcode_stats l ON s.roll_no = l.roll_no
         WHERE sp.leetcode_id IS NOT NULL 
-          AND (l.weekly_rank IS NULL OR l.roll_no IS NULL);
+          AND (l.weekly_rank IS NULL OR l.weekly_problems_solved = 0);
     ELSIF p_contest_type = 'biweekly' THEN
         RETURN QUERY
         SELECT 
@@ -245,7 +245,7 @@ BEGIN
         JOIN student_platforms sp ON s.roll_no = sp.roll_no
         LEFT JOIN leetcode_stats l ON s.roll_no = l.roll_no
         WHERE sp.leetcode_id IS NOT NULL 
-          AND (l.biweekly_rank IS NULL OR l.roll_no IS NULL);
+          AND (l.biweekly_rank IS NULL OR l.biweekly_problems_solved = 0);
     END IF;
 END;
 $$ LANGUAGE plpgsql;
