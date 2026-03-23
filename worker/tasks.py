@@ -11,6 +11,10 @@ sys.path.insert(0, '/Users/yeslin-parker/project/HackerRank-Analysis-Backend')
 from worker.celery_app import celery_app
 from database import supabase
 from utils.lock import release_lock
+from services.job_service import (
+    create_job, start_job, update_job_progress,
+    complete_job, fail_job, build_error_dict
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -173,21 +177,10 @@ def process_student_codeforces(
         
         logger.info(f"Updated Codeforces: {roll_no} - Rating: {current_rating}")
         return {"status": "success", "rating": current_rating}
-        
+         
     except Exception as e:
         logger.error(f"Error processing Codeforces data for {username}: {str(e)}")
         return {"status": "failed", "reason": str(e)}
-
-
-def update_job_progress(job_id: str, processed: int, total: int):
-    """Update job progress in database."""
-    try:
-        supabase.table("sync_jobs").update({
-            "processed_students": processed,
-            "total_students": total
-        }).eq("id", job_id).execute()
-    except Exception as e:
-        logger.error(f"Failed to update job progress: {e}")
 
 
 @celery_app.task(bind=True, name="worker.tasks.sync_codeforces")
@@ -202,30 +195,24 @@ def sync_codeforces_task(self) -> Dict[str, Any]:
     
     job_id = None
     try:
-        job_response = supabase.table("sync_jobs").insert({
-            "platform": "codeforces",
-            "status": "running"
-        }).execute()
-        
-        if job_response.data:
-            job_id = job_response.data[0]["id"]
-            logger.info(f"Created job {job_id}")
-        
         response = supabase.rpc("get_students_with_codeforces", {}).execute()
-        students = response.data
+        students = response.data or []
         
         if not students:
             logger.info("No students with Codeforces IDs found")
             return {"status": "success", "message": "No students with Codeforces IDs found"}
         
         total = len(students)
-        update_job_progress(job_id, 0, total)
+        job_id = create_job("codeforces", total, triggered_by="api")
+        
+        if job_id:
+            start_job(job_id)
+            update_job_progress(job_id, 0, total)
         
         recent_contests = fetch_recent_contests_sync()
         logger.info(f"Processing {total} students in batches of {CHUNK_SIZE}")
         
         batches = chunk_list(students, CHUNK_SIZE)
-        processed_count = 0
         success_count = 0
         failed_count = 0
         
@@ -239,16 +226,15 @@ def sync_codeforces_task(self) -> Dict[str, Any]:
                 elif result["status"] == "failed":
                     failed_count += 1
             
-            processed_count += len(batch)
-            update_job_progress(job_id, processed_count, total)
+            processed = batch_num * len(batch)
+            if job_id:
+                update_job_progress(job_id, min(processed, total), total, success_count, failed_count)
             time.sleep(1)
         
         logger.info(f"=== CELERY: Codeforces sync completed. Success: {success_count}, Failed: {failed_count} ===")
         
-        supabase.table("sync_jobs").update({
-            "status": "success",
-            "completed_at": datetime.now(timezone.utc).isoformat()
-        }).eq("id", job_id).execute()
+        if job_id:
+            complete_job(job_id, success_count, failed_count)
         
         return {
             "status": "success",
@@ -261,11 +247,8 @@ def sync_codeforces_task(self) -> Dict[str, Any]:
         logger.error(f"Codeforces sync failed: {str(e)}")
         
         if job_id:
-            supabase.table("sync_jobs").update({
-                "status": "failed",
-                "error_message": str(e),
-                "completed_at": datetime.now(timezone.utc).isoformat()
-            }).eq("id", job_id).execute()
+            error = build_error_dict("task_error", reason=str(e))
+            fail_job(job_id, error)
         
         return {"status": "error", "error": str(e)}
     

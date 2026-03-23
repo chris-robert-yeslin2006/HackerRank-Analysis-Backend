@@ -1,11 +1,14 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Union
+from typing import Optional, List, Union
 
 from worker.tasks import sync_codeforces_task, get_task_status
-from database import supabase
 from utils.lock import acquire_lock
+from services.job_service import (
+    get_jobs, get_job, get_stuck_jobs,
+    check_lock_db_consistency, build_job_response
+)
 
 router = APIRouter(prefix="/v2/sync", tags=["Sync V2"])
 
@@ -21,6 +24,11 @@ class TaskStatusResponse(BaseModel):
     status: str
     result: Union[dict, None] = None
     info: Union[str, None] = None
+
+
+class JobsResponse(BaseModel):
+    jobs: List[dict]
+    total: int
 
 
 @router.post("/codeforces")
@@ -61,10 +69,67 @@ def get_task_status_endpoint(task_id: str):
 
 
 @router.get("/jobs")
-def get_recent_jobs():
-    """Get recent sync jobs from the database."""
+def get_recent_jobs(
+    limit: int = Query(default=10, ge=1, le=100),
+    status: Optional[str] = Query(default=None, description="Filter by status"),
+    platform: Optional[str] = Query(default=None, description="Filter by platform")
+):
+    """
+    Get recent sync jobs with optional filters.
+    
+    - **limit**: Number of jobs to return (1-100, default 10)
+    - **status**: Filter by status ('pending', 'running', 'success', 'failed')
+    - **platform**: Filter by platform ('codeforces', 'leetcode', 'codechef')
+    """
     try:
-        response = supabase.table("sync_jobs").select("*").order("started_at", desc=True).limit(20).execute()
-        return response.data
+        jobs = get_jobs(limit=limit, status=status, platform=platform)
+        enhanced_jobs = [build_job_response(job) for job in jobs]
+        
+        return {
+            "jobs": enhanced_jobs,
+            "total": len(enhanced_jobs)
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error fetching jobs: {str(e)}")
+
+
+@router.get("/jobs/{job_id}")
+def get_single_job(job_id: str):
+    """Get a single job by ID with computed fields."""
+    try:
+        job = get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        return build_job_response(job)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching job: {str(e)}")
+
+
+@router.get("/jobs/stuck/list")
+def get_stuck_jobs_endpoint():
+    """Get jobs that have been running for more than 15 minutes."""
+    try:
+        jobs = get_stuck_jobs()
+        return {
+            "stuck_jobs": jobs,
+            "count": len(jobs),
+            "message": f"Found {len(jobs)} stuck job(s)"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error checking stuck jobs: {str(e)}")
+
+
+@router.get("/consistency-check")
+def check_consistency():
+    """
+    Check for inconsistencies between Redis locks and database running jobs.
+    Useful for debugging stuck jobs or orphaned locks.
+    """
+    try:
+        result = check_lock_db_consistency()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error checking consistency: {str(e)}")
