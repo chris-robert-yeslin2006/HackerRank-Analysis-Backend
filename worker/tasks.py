@@ -2,11 +2,15 @@ import httpx
 import asyncio
 import logging
 import time
+import sys
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 
+sys.path.insert(0, '/Users/yeslin-parker/project/HackerRank-Analysis-Backend')
+
 from worker.celery_app import celery_app
 from database import supabase
+from utils.lock import release_lock
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -191,6 +195,7 @@ def sync_codeforces_task(self) -> Dict[str, Any]:
     """
     Celery task for syncing Codeforces data.
     Processes students in batches with progress tracking.
+    Lock is released in finally block for safety.
     """
     logger.info("=== CELERY: Starting Codeforces sync task ===")
     task_id = self.request.id
@@ -263,6 +268,10 @@ def sync_codeforces_task(self) -> Dict[str, Any]:
             }).eq("id", job_id).execute()
         
         return {"status": "error", "error": str(e)}
+    
+    finally:
+        logger.info("=== CELERY: Releasing Codeforces sync lock ===")
+        release_lock("codeforces")
 
 
 def get_task_status(task_id: str) -> Dict[str, Any]:
