@@ -4,6 +4,7 @@ from database import supabase
 
 # Import routers
 from routers import auth, students, leaderboard, analytics, sync, platforms, chat
+from routers import sync_v2
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -33,6 +34,7 @@ app.include_router(students.router)
 app.include_router(leaderboard.router)
 app.include_router(analytics.router)
 app.include_router(sync.router)
+app.include_router(sync_v2.router)
 app.include_router(platforms.router)
 app.include_router(chat.router)
 
