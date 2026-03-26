@@ -15,9 +15,9 @@ from services.job_service import (
     create_job, start_job, update_job_progress,
     complete_job, fail_job, build_error_dict, get_students_by_roll_nos
 )
+from utils.logger import get_logger, log_sync_start, log_sync_complete, log_sync_failed, log_student_failed
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger("worker.tasks")
 
 CHUNK_SIZE = 50
 SEMAPHORE_LIMIT = 25
@@ -185,21 +185,19 @@ def process_student_codeforces(
 
 @celery_app.task(bind=True, name="worker.tasks.sync_codeforces")
 def sync_codeforces_task(self, student_list: list = None) -> Dict[str, Any]:
-    """
-    Celery task for syncing Codeforces data.
-    Processes students in batches with progress tracking.
-    
-    Args:
-        student_list: Optional list of roll_nos to process (for retry mode).
-                     If None, processes all students with Codeforces IDs.
-    Lock is released in finally block for safety.
-    """
-    logger.info("=== CELERY: Starting Codeforces sync task ===")
-    is_retry = student_list is not None
-    if is_retry:
-        logger.info(f"RETRY MODE: Processing {len(student_list)} specific students")
-    
     task_id = self.request.id
+    is_retry = student_list is not None
+    
+    logger.info(
+        "Codeforces sync task started",
+        extra={"event": "task_started", "task_id": task_id, "platform": "codeforces"}
+    )
+    
+    if is_retry:
+        logger.info(
+            "Retry mode enabled",
+            extra={"event": "retry_mode", "task_id": task_id, "students_count": len(student_list)}
+        )
     
     job_id = None
     failed_students = []
@@ -212,7 +210,10 @@ def sync_codeforces_task(self, student_list: list = None) -> Dict[str, Any]:
             students = response.data or []
         
         if not students:
-            logger.info("No students with Codeforces IDs found")
+            logger.info(
+                "No students to process",
+                extra={"event": "no_students", "task_id": task_id, "platform": "codeforces"}
+            )
             return {"status": "success", "message": "No students with Codeforces IDs found"}
         
         total = len(students)
@@ -223,15 +224,23 @@ def sync_codeforces_task(self, student_list: list = None) -> Dict[str, Any]:
             start_job(job_id)
             update_job_progress(job_id, 0, total)
         
+        log_sync_start(logger, job_id, "codeforces", total)
+        
         recent_contests = fetch_recent_contests_sync()
-        logger.info(f"Processing {total} students in batches of {CHUNK_SIZE}")
+        logger.info(
+            "Processing students in batches",
+            extra={"event": "batch_processing", "job_id": job_id, "total": total, "chunk_size": CHUNK_SIZE}
+        )
         
         batches = chunk_list(students, CHUNK_SIZE)
         success_count = 0
         failed_count = 0
         
         for batch_num, batch in enumerate(batches, 1):
-            logger.info(f"Processing batch {batch_num}/{len(batches)} ({len(batch)} students)")
+            logger.info(
+                f"Processing batch {batch_num}/{len(batches)}",
+                extra={"event": "batch_start", "job_id": job_id, "batch_num": batch_num, "total_batches": len(batches)}
+            )
             refresh_lock("codeforces")
             
             for student in batch:
@@ -243,13 +252,14 @@ def sync_codeforces_task(self, student_list: list = None) -> Dict[str, Any]:
                     roll_no = student.get("roll_no")
                     if roll_no:
                         failed_students.append(roll_no)
+                        log_student_failed(logger, job_id, "codeforces", roll_no, result.get("reason", "unknown"))
             
             processed = batch_num * len(batch)
             if job_id:
                 update_job_progress(job_id, min(processed, total), total, success_count, failed_count)
             time.sleep(1)
         
-        logger.info(f"=== CELERY: Codeforces sync completed. Success: {success_count}, Failed: {failed_count} ===")
+        log_sync_complete(logger, job_id, "codeforces", total, success_count, failed_count)
         
         if job_id:
             complete_job(job_id, success_count, failed_count, failed_students)
@@ -263,7 +273,10 @@ def sync_codeforces_task(self, student_list: list = None) -> Dict[str, Any]:
         }
         
     except Exception as e:
-        logger.error(f"Codeforces sync failed: {str(e)}")
+        logger.exception(
+            "Codeforces sync task failed",
+            extra={"event": "task_error", "job_id": job_id, "platform": "codeforces"}
+        )
         
         if job_id:
             error = build_error_dict("task_error", reason=str(e))
@@ -272,7 +285,10 @@ def sync_codeforces_task(self, student_list: list = None) -> Dict[str, Any]:
         return {"status": "error", "error": str(e)}
     
     finally:
-        logger.info("=== CELERY: Releasing Codeforces sync lock ===")
+        logger.info(
+            "Releasing lock",
+            extra={"event": "lock_release", "platform": "codeforces"}
+        )
         release_lock("codeforces")
 
 

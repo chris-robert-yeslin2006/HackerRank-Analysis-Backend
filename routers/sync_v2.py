@@ -9,6 +9,9 @@ from services.job_service import (
     get_jobs, get_job, get_stuck_jobs,
     check_lock_db_consistency, build_job_response, get_retry_job_info
 )
+from utils.logger import get_logger, log_retry_triggered
+
+logger = get_logger("routers.sync_v2")
 
 router = APIRouter(prefix="/v2/sync", tags=["Sync V2"])
 
@@ -33,11 +36,11 @@ class JobsResponse(BaseModel):
 
 @router.post("/codeforces")
 def trigger_codeforces_sync():
-    """
-    Trigger Codeforces sync as a background Celery task.
-    Returns immediately with a task_id for status tracking.
-    Lock prevents duplicate sync jobs.
-    """
+    logger.info(
+        "Sync request received",
+        extra={"event": "sync_request", "platform": "codeforces", "path": "/v2/sync/codeforces"}
+    )
+    
     if not acquire_lock("codeforces"):
         return JSONResponse(
             status_code=409,
@@ -47,6 +50,11 @@ def trigger_codeforces_sync():
     try:
         result = sync_codeforces_task.delay()
         
+        logger.info(
+            "Sync task queued",
+            extra={"event": "task_queued", "platform": "codeforces", "task_id": result.id}
+        )
+        
         return {
             "task_id": result.id,
             "message": "Codeforces sync task queued successfully",
@@ -55,6 +63,10 @@ def trigger_codeforces_sync():
     except Exception as e:
         from utils.lock import release_lock
         release_lock("codeforces")
+        logger.exception(
+            "Failed to queue sync task",
+            extra={"event": "task_queue_error", "platform": "codeforces"}
+        )
         raise HTTPException(status_code=500, detail=f"Failed to queue task: {str(e)}")
 
 
@@ -137,16 +149,11 @@ def check_consistency():
 
 @router.post("/codeforces/retry/{job_id}")
 def retry_failed_students(job_id: str):
-    """
-    Retry sync for failed students from a previous job.
+    logger.info(
+        "Retry request received",
+        extra={"event": "retry_request", "original_job_id": job_id, "platform": "codeforces"}
+    )
     
-    - Fetches failed_students from the specified job
-    - Creates a new job for retry
-    - Triggers Celery task with only the failed students
-    
-    Args:
-        job_id: The original job ID to retry failed students from
-    """
     try:
         job_info = get_retry_job_info(job_id)
         
@@ -156,6 +163,10 @@ def retry_failed_students(job_id: str):
         failed_students = job_info.get("failed_students", [])
         
         if not failed_students:
+            logger.info(
+                "No failed students to retry",
+                extra={"event": "retry_skipped", "original_job_id": job_id, "failed_count": 0}
+            )
             return {
                 "message": "No failed students to retry",
                 "job_id": job_id,
@@ -171,6 +182,8 @@ def retry_failed_students(job_id: str):
         try:
             result = sync_codeforces_task.delay(failed_students)
             
+            log_retry_triggered(logger, job_id, result.id, "codeforces", len(failed_students))
+            
             return {
                 "task_id": result.id,
                 "message": f"Retry queued for {len(failed_students)} failed students",
@@ -181,6 +194,10 @@ def retry_failed_students(job_id: str):
         except Exception as e:
             from utils.lock import release_lock
             release_lock("codeforces")
+            logger.exception(
+                "Failed to queue retry task",
+                extra={"event": "retry_queue_error", "original_job_id": job_id}
+            )
             raise HTTPException(status_code=500, detail=f"Failed to queue retry task: {str(e)}")
             
     except HTTPException:

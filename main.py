@@ -1,25 +1,21 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from database import supabase
+from database import supabase, get_cache_stats, get_selected_provider
 
-# Import routers
-from routers import auth, students, leaderboard, analytics, sync, platforms, chat
-from routers import sync_v2
+from middleware.logging import RequestLoggingMiddleware
 
-# Initialize FastAPI app
 app = FastAPI(
     title="HackerRank Analysis API",
     description="API for HackerRank Analysis Backend with Supabase",
     version="1.0.0"
 )
 
-# CORS setup for future frontend
-
 origins = [
     "https://hacker-rank-analyzer.vercel.app",
     "http://localhost:3000",
 ]
 
+app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -28,7 +24,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include Routers
+from routers import auth, students, leaderboard, analytics, sync, platforms, chat
+from routers import sync_v2
+
 app.include_router(auth.router)
 app.include_router(students.router)
 app.include_router(leaderboard.router)
@@ -45,3 +43,7 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "ok", "supabase_connected": supabase is not None}
+
+@app.get("/cache/stats")
+def cache_stats():
+    return get_cache_stats()

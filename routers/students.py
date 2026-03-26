@@ -1,67 +1,18 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from database import supabase, redis_client
+from database import CacheService, supabase
 from schemas import StudentCreate, StudentUpdate, Student, StudentFullUpdate
 from typing import List
 import csv
 import io
 import re
-import json
-import time
+from utils.logger import get_logger
+
+logger = get_logger("routers.students")
 
 router = APIRouter(tags=["Students"])
 
-_cache = {}
-_cache_ttl = 30
+cache = CacheService(namespace="students", default_ttl=30)
 
-def get_cached(key):
-    if redis_client:
-        try:
-            data = redis_client.get(f"cache:{key}")
-            if data:
-                print(f"🔵 Redis HIT: {key}")
-                return json.loads(data)
-            print(f"🔴 Redis MISS: {key}")
-        except Exception as e:
-            print(f"⚠️ Redis error: {e}")
-    
-    if key in _cache:
-        data, timestamp = _cache[key]
-        if time.time() - timestamp < _cache_ttl:
-            print(f"🔵 Memory HIT: {key}")
-            return data
-    return None
-
-def set_cached(key, value):
-    if redis_client:
-        try:
-            redis_client.set(f"cache:{key}", json.dumps(value), ex=30)
-            print(f"✅ Redis SET: {key}")
-            return
-        except Exception as e:
-            print(f"⚠️ Redis set error: {e}")
-    
-    _cache[key] = (value, time.time())
-    print(f"✅ Memory SET: {key}")
-
-def invalidate_cache(prefix=None):
-    global _cache
-    if redis_client:
-        try:
-            if prefix:
-                keys = redis_client.keys(f"cache:{prefix}*")
-                if keys:
-                    redis_client.delete(*keys)
-            else:
-                keys = redis_client.keys("cache:*")
-                if keys:
-                    redis_client.delete(*keys)
-        except Exception as e:
-            print(f"⚠️ Redis invalidate error: {e}")
-    
-    if prefix:
-        _cache = {k: v for k, v in _cache.items() if not k.startswith(prefix)}
-    else:
-        _cache = {}
 
 def clean_leetcode_username(raw_id: str) -> str:
     if not raw_id or not isinstance(raw_id, str):
@@ -73,20 +24,17 @@ def clean_leetcode_username(raw_id: str) -> str:
     raw_id = re.sub(r'[^a-zA-Z0-9_-].*$', '', raw_id)
     return raw_id.strip()
 
+
 @router.get("/students", response_model=List[Student])
 def get_all_students():
     cache_key = "students_all"
-    cached = get_cached(cache_key)
-    if cached:
-        return cached
     
-    try:
+    def fetch():
         response = supabase.table("students").select("*").execute()
-        data = response.data
-        set_cached(cache_key, data)
-        return data
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch students: {str(e)}")
+        return response.data
+    
+    return cache.get(cache_key, fetch_func=fetch)
+
 
 @router.post("/students")
 def add_student(student: StudentCreate):
@@ -94,10 +42,11 @@ def add_student(student: StudentCreate):
         response = supabase.table("students").insert(student.model_dump()).execute()
         if not response.data:
             raise HTTPException(status_code=400, detail="Failed to add student")
-        invalidate_cache("students")
+        cache.delete("students_all")
         return {"message": "Student added successfully", "data": response.data[0]}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error adding student: {str(e)}")
+
 
 @router.post("/students/bulk")
 async def add_students_bulk(file: UploadFile = File(...)):
@@ -136,11 +85,12 @@ async def add_students_bulk(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="CSV file is empty")
             
         response = supabase.table("students").upsert(students_data, on_conflict="roll_no").execute()
-        invalidate_cache("students")
+        cache.delete("students_all")
         return {"message": "Bulk upload successful", "inserted": len(response.data), "data": response.data}
         
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Bulk upload failed: {str(e)}")
+
 
 @router.patch("/students/{roll_no}")
 def update_student(roll_no: str, student_update: StudentUpdate):
@@ -176,14 +126,14 @@ def update_student(roll_no: str, student_update: StudentUpdate):
                 **platform_fields
             }).execute()
         
-        invalidate_cache("students")
-        invalidate_cache("platforms")
+        cache.delete("students_all")
             
         return {"message": "Student updated successfully", "roll_no": roll_no}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.delete("/students/{student_id}")
 def delete_student(student_id: str):
@@ -193,11 +143,12 @@ def delete_student(student_id: str):
         if not response.data:
             raise HTTPException(status_code=404, detail="Student not found")
         
-        invalidate_cache("students")
+        cache.delete("students_all")
             
         return {"message": "Student deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.get("/students/roll/{roll_no}")
 def get_student_by_roll(roll_no: str):

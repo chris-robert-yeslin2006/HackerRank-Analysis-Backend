@@ -1,13 +1,13 @@
 import json
-import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 from supabase import Client as SupabaseClient
 
 from database import supabase
 from utils.lock import is_locked
+from utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("services.job_service")
 
 STUCK_THRESHOLD_MINUTES = 15
 

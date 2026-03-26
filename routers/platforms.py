@@ -1,67 +1,18 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from database import supabase, redis_client
+from database import CacheService, supabase
 from schemas import StudentPlatform, StudentPlatformUpdate
 from typing import List
 import csv
 import io
 import re
-import json
-import time
+from utils.logger import get_logger
+
+logger = get_logger("routers.platforms")
 
 router = APIRouter(tags=["Platforms"])
 
-_cache = {}
-_cache_ttl = 30
+cache = CacheService(namespace="platforms", default_ttl=30)
 
-def get_cached(key):
-    if redis_client:
-        try:
-            data = redis_client.get(f"cache:{key}")
-            if data:
-                print(f"🔵 Redis HIT: {key}")
-                return json.loads(data)
-            print(f"🔴 Redis MISS: {key}")
-        except Exception as e:
-            print(f"⚠️ Redis error: {e}")
-    
-    if key in _cache:
-        data, timestamp = _cache[key]
-        if time.time() - timestamp < _cache_ttl:
-            print(f"🔵 Memory HIT: {key}")
-            return data
-    return None
-
-def set_cached(key, value):
-    if redis_client:
-        try:
-            redis_client.set(f"cache:{key}", json.dumps(value), ex=30)
-            print(f"✅ Redis SET: {key}")
-            return
-        except Exception as e:
-            print(f"⚠️ Redis set error: {e}")
-    
-    _cache[key] = (value, time.time())
-    print(f"✅ Memory SET: {key}")
-
-def invalidate_cache(prefix=None):
-    global _cache
-    if redis_client:
-        try:
-            if prefix:
-                keys = redis_client.keys(f"cache:{prefix}*")
-                if keys:
-                    redis_client.delete(*keys)
-            else:
-                keys = redis_client.keys("cache:*")
-                if keys:
-                    redis_client.delete(*keys)
-        except Exception as e:
-            print(f"⚠️ Redis invalidate error: {e}")
-    
-    if prefix:
-        _cache = {k: v for k, v in _cache.items() if not k.startswith(prefix)}
-    else:
-        _cache = {}
 
 def clean_leetcode_username(raw_id: str) -> str:
     if not raw_id or not isinstance(raw_id, str):
@@ -72,6 +23,7 @@ def clean_leetcode_username(raw_id: str) -> str:
     raw_id = raw_id.replace('(new)', '')
     raw_id = re.sub(r'[^a-zA-Z0-9_-].*$', '', raw_id)
     return raw_id.strip()
+
 
 @router.post("/platforms/bulk")
 def add_platforms_bulk(platforms: List[StudentPlatform]):
@@ -92,6 +44,7 @@ def add_platforms_bulk(platforms: List[StudentPlatform]):
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to store platforms: {str(e)}")
+
 
 @router.post("/platforms/csv")
 async def add_platforms_csv(file: UploadFile = File(...)):
@@ -125,6 +78,7 @@ async def add_platforms_csv(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="CSV file is empty")
             
         response = supabase.table("student_platforms").upsert(platform_data).execute()
+        cache.delete("platforms_all")
         
         return {
             "message": "CSV data stored successfully",
@@ -134,20 +88,17 @@ async def add_platforms_csv(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"CSV upload failed: {str(e)}")
 
+
 @router.get("/platforms")
 def get_all_platforms():
     cache_key = "platforms_all"
-    cached = get_cached(cache_key)
-    if cached:
-        return cached
     
-    try:
+    def fetch():
         response = supabase.table("student_platforms").select("*").execute()
-        data = response.data
-        set_cached(cache_key, data)
-        return data
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return response.data
+    
+    return cache.get(cache_key, fetch_func=fetch)
+
 
 @router.post("/platforms")
 def add_platform_entry(platform_data: StudentPlatform):
@@ -161,10 +112,12 @@ def add_platform_entry(platform_data: StudentPlatform):
             data["leetcode_id"] = clean_leetcode_username(data["leetcode_id"])
 
         response = supabase.table("student_platforms").upsert(data).execute()
+        cache.delete("platforms_all")
         
         return {"message": "Platform IDs added successfully", "data": response.data[0]}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to add platform IDs: {str(e)}")
+
 
 @router.patch("/platforms/{roll_no}")
 def update_platform_entry(roll_no: str, platform_update: StudentPlatformUpdate):
@@ -195,8 +148,7 @@ def update_platform_entry(roll_no: str, platform_update: StudentPlatformUpdate):
             if not response.data:
                 raise HTTPException(status_code=404, detail=f"Student with roll_no {roll_no} not found in platform table.")
 
-        invalidate_cache("platforms")
-        invalidate_cache("students")
+        cache.delete("platforms_all")
         
         return {"message": "Platform IDs updated successfully"}
     except HTTPException:

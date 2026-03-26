@@ -1,16 +1,15 @@
 import httpx
 import asyncio
 import re
-import logging
 import time
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from database import supabase
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from uuid import UUID
+from utils.logger import get_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger("routers.sync")
 
 router = APIRouter(tags=["Sync"])
 
@@ -186,15 +185,31 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
                     medium_today = delta_medium
                     hard_today = delta_hard
                 
-                print(f"[{username}] OLD: easy={old_easy}, medium={old_medium}, hard={old_hard}, today_e={old_easy_today}, today_m={old_medium_today}, today_h={old_hard_today}")
-                print(f"[{username}] NEW: easy={easy_solved}, medium={medium_solved}, hard={hard_solved}")
-                print(f"[{username}] DELTA: easy={delta_easy}, medium={delta_medium}, hard={delta_hard}, same_day={is_same_day}")
-                print(f"[{username}] TODAY: easy={easy_today}, medium={medium_today}, hard={hard_today}")
+                logger.info(
+                    "LeetCode stats updated",
+                    extra={
+                        "event": "student_updated",
+                        "platform": "leetcode",
+                        "username": username,
+                        "old_stats": {"easy": old_easy, "medium": old_medium, "hard": old_hard},
+                        "new_stats": {"easy": easy_solved, "medium": medium_solved, "hard": hard_solved},
+                        "delta": {"easy": delta_easy, "medium": delta_medium, "hard": delta_hard},
+                        "today": {"easy": easy_today, "medium": medium_today, "hard": hard_today}
+                    }
+                )
             else:
                 easy_today = easy_solved
                 medium_today = medium_solved
                 hard_today = hard_solved
-                print(f"[{username}] NEW USER - TODAY = TOTAL: easy={easy_today}, medium={medium_today}, hard={hard_today}")
+                logger.info(
+                    "New LeetCode user",
+                    extra={
+                        "event": "new_user",
+                        "platform": "leetcode",
+                        "username": username,
+                        "stats": {"easy": easy_today, "medium": medium_today, "hard": hard_today}
+                    }
+                )
             
             rating = None
             if data["userContestRanking"]:
@@ -358,7 +373,10 @@ async def fetch_recent_contests(client: httpx.AsyncClient) -> List[Dict[str, Any
             current_time = int(time.time())
             finished_contests = [c for c in contests if c.get("startTimeSeconds", 0) < current_time]
             recent_contests = [{"id": c.get("id"), "name": c.get("name"), "startTime": c.get("startTimeSeconds")} for c in finished_contests[:5]]
-            print("Recent 5 FINISHED Codeforces contests (with dates):", recent_contests)
+            logger.info(
+                "Fetched recent contests",
+                extra={"event": "contests_fetched", "platform": "codeforces", "count": len(recent_contests)}
+            )
             return recent_contests
     except Exception as e:
         logger.error(f"Error fetching recent contests: {e}")

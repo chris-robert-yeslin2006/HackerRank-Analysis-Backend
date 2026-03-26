@@ -5,6 +5,9 @@ import json
 import os
 from pydantic import BaseModel
 from typing import List, Optional, Any
+from utils.logger import get_logger
+
+logger = get_logger("routers.chat")
 
 router = APIRouter(tags=["Chat"])
 
@@ -89,27 +92,26 @@ async def chat_to_sql(request: ChatRequest):
             }
             
             try:
-                print(f"DEBUG: Trying model {model_name}...")
+                logger.debug(f"Trying model {model_name}", extra={"event": "model_try", "model": model_name})
                 response = await client.post(url, json=payload)
                 
                 if response.status_code == 200:
                     data = response.json()
-                    # Extract text from Gemini response structure
                     try:
                         sql_query = data['candidates'][0]['content']['parts'][0]['text'].strip()
-                        print(f"DEBUG: Successfully used {model_name}")
+                        logger.debug(f"Model succeeded", extra={"event": "model_success", "model": model_name})
                         break
                     except (KeyError, IndexError):
-                        print(f"DEBUG: Unexpected response structure from {model_name}")
+                        logger.debug(f"Unexpected response structure", extra={"event": "model_error", "model": model_name})
                         continue
                 else:
                     last_error = f"Status {response.status_code}: {response.text}"
-                    print(f"DEBUG: Model {model_name} failed with {last_error}")
+                    logger.debug(f"Model failed", extra={"event": "model_error", "model": model_name, "status": response.status_code})
                     continue
                     
             except Exception as e:
                 last_error = str(e)
-                print(f"DEBUG: Exception with {model_name}: {last_error}")
+                logger.debug(f"Exception with model", extra={"event": "model_exception", "model": model_name})
                 continue
     
     if not sql_query:
@@ -137,5 +139,5 @@ async def chat_to_sql(request: ChatRequest):
         )
 
     except Exception as e:
-        print(f"Chat Execution Error: {str(e)}")
+        logger.error("Chat execution error", extra={"event": "chat_error", "error": str(e)})
         raise HTTPException(status_code=500, detail=f"Error executing database query: {str(e)}")
