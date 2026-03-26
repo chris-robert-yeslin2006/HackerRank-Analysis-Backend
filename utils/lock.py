@@ -52,3 +52,20 @@ def is_locked(platform: str) -> bool:
     """
     key = f"{LOCK_PREFIX}{platform}"
     return redis_client.exists(key) > 0
+
+
+def refresh_lock(platform: str) -> bool:
+    """
+    Refresh the TTL of an existing lock.
+    
+    Args:
+        platform: Platform name
+    
+    Returns:
+        True if lock refreshed, False if no lock exists
+    """
+    key = f"{LOCK_PREFIX}{platform}"
+    if redis_client.exists(key):
+        redis_client.expire(key, LOCK_TTL)
+        return True
+    return False

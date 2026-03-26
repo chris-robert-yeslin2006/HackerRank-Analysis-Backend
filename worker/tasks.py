@@ -10,7 +10,7 @@ sys.path.insert(0, '/Users/yeslin-parker/project/HackerRank-Analysis-Backend')
 
 from worker.celery_app import celery_app
 from database import supabase
-from utils.lock import release_lock
+from utils.lock import release_lock, refresh_lock
 from services.job_service import (
     create_job, start_job, update_job_progress,
     complete_job, fail_job, build_error_dict
@@ -218,6 +218,7 @@ def sync_codeforces_task(self) -> Dict[str, Any]:
         
         for batch_num, batch in enumerate(batches, 1):
             logger.info(f"Processing batch {batch_num}/{len(batches)} ({len(batch)} students)")
+            refresh_lock("codeforces")
             
             for student in batch:
                 result = process_student_codeforces(student, recent_contests)
