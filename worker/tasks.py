@@ -13,7 +13,7 @@ from database import supabase
 from utils.lock import release_lock, refresh_lock
 from services.job_service import (
     create_job, start_job, update_job_progress,
-    complete_job, fail_job, build_error_dict
+    complete_job, fail_job, build_error_dict, get_students_by_roll_nos
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -184,26 +184,40 @@ def process_student_codeforces(
 
 
 @celery_app.task(bind=True, name="worker.tasks.sync_codeforces")
-def sync_codeforces_task(self) -> Dict[str, Any]:
+def sync_codeforces_task(self, student_list: list = None) -> Dict[str, Any]:
     """
     Celery task for syncing Codeforces data.
     Processes students in batches with progress tracking.
+    
+    Args:
+        student_list: Optional list of roll_nos to process (for retry mode).
+                     If None, processes all students with Codeforces IDs.
     Lock is released in finally block for safety.
     """
     logger.info("=== CELERY: Starting Codeforces sync task ===")
+    is_retry = student_list is not None
+    if is_retry:
+        logger.info(f"RETRY MODE: Processing {len(student_list)} specific students")
+    
     task_id = self.request.id
     
     job_id = None
+    failed_students = []
+    
     try:
-        response = supabase.rpc("get_students_with_codeforces", {}).execute()
-        students = response.data or []
+        if is_retry:
+            students = get_students_by_roll_nos(student_list)
+        else:
+            response = supabase.rpc("get_students_with_codeforces", {}).execute()
+            students = response.data or []
         
         if not students:
             logger.info("No students with Codeforces IDs found")
             return {"status": "success", "message": "No students with Codeforces IDs found"}
         
         total = len(students)
-        job_id = create_job("codeforces", total, triggered_by="api")
+        triggered_by = "retry" if is_retry else "api"
+        job_id = create_job("codeforces", total, triggered_by=triggered_by)
         
         if job_id:
             start_job(job_id)
@@ -226,6 +240,9 @@ def sync_codeforces_task(self) -> Dict[str, Any]:
                     success_count += 1
                 elif result["status"] == "failed":
                     failed_count += 1
+                    roll_no = student.get("roll_no")
+                    if roll_no:
+                        failed_students.append(roll_no)
             
             processed = batch_num * len(batch)
             if job_id:
@@ -235,13 +252,14 @@ def sync_codeforces_task(self) -> Dict[str, Any]:
         logger.info(f"=== CELERY: Codeforces sync completed. Success: {success_count}, Failed: {failed_count} ===")
         
         if job_id:
-            complete_job(job_id, success_count, failed_count)
+            complete_job(job_id, success_count, failed_count, failed_students)
         
         return {
             "status": "success",
             "total": total,
             "success": success_count,
-            "failed": failed_count
+            "failed": failed_count,
+            "failed_students": failed_students
         }
         
     except Exception as e:

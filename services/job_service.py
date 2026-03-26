@@ -76,16 +76,20 @@ def update_job_progress(
         logger.error(f"Failed to update job progress: {e}")
 
 
-def complete_job(job_id: str, success: int = 0, failed: int = 0) -> bool:
+def complete_job(job_id: str, success: int = 0, failed: int = 0, failed_students: List[str] = None) -> bool:
     """Mark a job as successfully completed."""
     try:
-        supabase.table("sync_jobs").update({
+        update_data = {
             "status": "success",
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "processed_students": success + failed,
             "success_count": success,
             "failed_count": failed
-        }).eq("id", job_id).execute()
+        }
+        if failed_students is not None:
+            update_data["failed_students"] = failed_students
+        
+        supabase.table("sync_jobs").update(update_data).eq("id", job_id).execute()
         logger.info(f"Job {job_id} completed successfully")
         return True
     except Exception as e:
@@ -233,6 +237,13 @@ def build_job_response(job: Dict[str, Any]) -> Dict[str, Any]:
         except (json.JSONDecodeError, TypeError):
             pass
     
+    failed_students = job.get("failed_students", [])
+    if isinstance(failed_students, str):
+        try:
+            failed_students = json.loads(failed_students)
+        except (json.JSONDecodeError, TypeError):
+            failed_students = []
+    
     return {
         "id": job.get("id"),
         "platform": job.get("platform"),
@@ -244,6 +255,7 @@ def build_job_response(job: Dict[str, Any]) -> Dict[str, Any]:
         "processed_students": processed,
         "success_count": job.get("success_count", 0),
         "failed_count": job.get("failed_count", 0),
+        "failed_students": failed_students,
         "progress": progress,
         "error": error_message
     }
@@ -269,3 +281,53 @@ def build_error_dict(error_type: str, student: Optional[str] = None, reason: str
     if student:
         error["student"] = student
     return error
+
+
+def get_students_by_roll_nos(roll_nos: List[str]) -> List[Dict[str, Any]]:
+    """
+    Get students by list of roll numbers (for retry mode).
+    
+    Args:
+        roll_nos: List of student roll numbers to fetch
+    
+    Returns:
+        List of student records with platform IDs
+    """
+    try:
+        response = supabase.table("student_platforms").select(
+            "roll_no, codeforces_id, leetcode_id, codechef_id, students(name)"
+        ).in_("roll_no", roll_nos).execute()
+        return response.data or []
+    except Exception as e:
+        logger.error(f"Failed to get students by roll_nos: {e}")
+        return []
+
+
+def get_retry_job_info(job_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get job info for retry, including failed_students.
+    
+    Args:
+        job_id: The job ID to get info for
+    
+    Returns:
+        Job info dict with failed_students, or None if not found
+    """
+    job = get_job(job_id)
+    if not job:
+        return None
+    
+    failed_students = job.get("failed_students", [])
+    if isinstance(failed_students, str):
+        try:
+            failed_students = json.loads(failed_students)
+        except (json.JSONDecodeError, TypeError):
+            failed_students = []
+    
+    return {
+        "id": job["id"],
+        "platform": job["platform"],
+        "status": job["status"],
+        "failed_count": job.get("failed_count", 0),
+        "failed_students": failed_students
+    }

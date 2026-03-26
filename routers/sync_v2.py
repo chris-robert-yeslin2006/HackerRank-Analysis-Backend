@@ -7,7 +7,7 @@ from worker.tasks import sync_codeforces_task, get_task_status
 from utils.lock import acquire_lock
 from services.job_service import (
     get_jobs, get_job, get_stuck_jobs,
-    check_lock_db_consistency, build_job_response
+    check_lock_db_consistency, build_job_response, get_retry_job_info
 )
 
 router = APIRouter(prefix="/v2/sync", tags=["Sync V2"])
@@ -133,3 +133,57 @@ def check_consistency():
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error checking consistency: {str(e)}")
+
+
+@router.post("/codeforces/retry/{job_id}")
+def retry_failed_students(job_id: str):
+    """
+    Retry sync for failed students from a previous job.
+    
+    - Fetches failed_students from the specified job
+    - Creates a new job for retry
+    - Triggers Celery task with only the failed students
+    
+    Args:
+        job_id: The original job ID to retry failed students from
+    """
+    try:
+        job_info = get_retry_job_info(job_id)
+        
+        if not job_info:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        
+        failed_students = job_info.get("failed_students", [])
+        
+        if not failed_students:
+            return {
+                "message": "No failed students to retry",
+                "job_id": job_id,
+                "failed_count": 0
+            }
+        
+        if not acquire_lock("codeforces"):
+            return JSONResponse(
+                status_code=409,
+                content={"message": "Sync already running", "status": "locked"}
+            )
+        
+        try:
+            result = sync_codeforces_task.delay(failed_students)
+            
+            return {
+                "task_id": result.id,
+                "message": f"Retry queued for {len(failed_students)} failed students",
+                "status_url": f"/v2/sync/status/{result.id}",
+                "original_job_id": job_id,
+                "students_to_retry": len(failed_students)
+            }
+        except Exception as e:
+            from utils.lock import release_lock
+            release_lock("codeforces")
+            raise HTTPException(status_code=500, detail=f"Failed to queue retry task: {str(e)}")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error retrying job: {str(e)}")
