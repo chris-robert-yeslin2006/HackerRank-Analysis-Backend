@@ -10,10 +10,12 @@ A FastAPI-based backend service for tracking and analyzing competitive programmi
 |-------|------------|
 | **Framework** | FastAPI |
 | **Database** | PostgreSQL (Supabase) |
-| **Caching** | Redis + In-Memory Fallback |
+| **Caching** | Multi-level (Memory + Redis) + Automatic Selection |
+| **Background Jobs** | Celery + Redis (Broker) |
 | **External APIs** | LeetCode GraphQL, Codeforces REST, CodeChef REST, HackerRank |
 | **AI Integration** | Google Gemini API (for natural language SQL queries) |
 | **Async HTTP** | httpx |
+| **Logging** | Structured JSON logging (Python logging) |
 
 ## Architecture Diagram
 
@@ -21,27 +23,210 @@ A FastAPI-based backend service for tracking and analyzing competitive programmi
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                              Client                                      │
 └─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
+                                     │
+                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          FastAPI Application                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │                   RequestLoggingMiddleware                            ││
+│  │  (JSON logs: method, path, status_code, duration_ms)                ││
+│  └─────────────────────────────────────────────────────────────────────┘│
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │
 │  │   Auth      │  │  Students   │  │ Leaderboard │  │  Analytics  │   │
 │  │  Router     │  │  Router     │  │  Router     │  │  Router     │   │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘   │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │
-│  │  Platforms  │  │    Sync     │  │    Chat     │  │             │   │
-│  │  Router     │  │  Router     │  │  Router     │  │             │   │
+│  │  Platforms  │  │    Sync     │  │    Chat     │  │  Sync V2    │   │
+│  │  Router     │  │  Router     │  │  Router     │  │  Router     │   │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                    ┌───────────────┼───────────────┐
-                    ▼               ▼               ▼
-            ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-            │  Supabase   │ │   Redis     │ │  External   │
-            │ PostgreSQL  │ │   Cache     │ │    APIs     │
-            └─────────────┘ └─────────────┘ └─────────────┘
+                                     │
+         ┌───────────────────────────┼───────────────────────────┐
+         ▼                           ▼                           ▼
+┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│  Multi-Level    │       │   Supabase      │       │   External      │
+│     Cache       │       │   PostgreSQL     │       │    APIs         │
+│ ┌─────────────┐ │       └─────────────────┘       └─────────────────┘
+│ │ L1: Memory  │ │
+│ │ L2: Redis   │ │
+│ └─────────────┘ │
+└─────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Celery Worker                                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                     │
+│  │ sync_*      │  │  Job Track  │  │   Lock      │                     │
+│  │   Tasks     │  │   Service   │  │  Manager    │                     │
+│  └─────────────┘  └─────────────┘  └─────────────┘                     │
+└─────────────────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            Redis                                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                     │
+│  │  Broker    │  │   Result    │  │    Lock     │                     │
+│  │   Queue    │  │   Backend   │  │   Store     │                     │
+│  └─────────────┘  └─────────────┘  └─────────────┘                     │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Multi-Level Caching System
+
+### Cache Layers
+
+| Layer | Technology | Latency | TTL | Purpose |
+|-------|------------|---------|-----|---------|
+| **L1** | In-memory dict (thread-safe) | ~0.02ms | 30-60s | Ultra-fast, process-local |
+| **L2** | Redis (Upstash or Railway) | ~5ms | 60s | Shared across instances |
+| **L3** | PostgreSQL | ~50ms | - | Source of truth |
+
+### Cache Flow
+
+```
+Request
+   │
+   ▼
+┌─────────────────────────────────────┐
+│           L1: Memory Cache          │
+│  • Thread-safe dict                 │
+│  • Per-key TTL                      │
+│  • Stale-while-revalidate (30s)     │
+└─────────────────────────────────────┘
+   │ hit
+   ▼ return (0.02ms)
+   
+Request (L1 miss)
+   │
+   ▼
+┌─────────────────────────────────────┐
+│           L2: Redis Cache            │
+│  • Auto-selects fastest provider    │
+│  • Gzip compression >100KB         │
+│  • JSON serialization               │
+└─────────────────────────────────────┘
+   │ hit
+   ▼ populate L1 + return (~5ms)
+   
+Request (L2 miss)
+   │
+   ▼
+┌─────────────────────────────────────┐
+│           L3: PostgreSQL             │
+│  • Original data source             │
+│  • Paginated RPC calls              │
+└─────────────────────────────────────┘
+   │ miss
+   ▼ populate L1 + L2 + return
+```
+
+### Cache Service API
+
+```python
+from database import CacheService
+
+cache = CacheService(namespace="analytics", default_ttl=60)
+
+# Get with auto-fetch on miss
+result = cache.get(cache_key, fetch_func=lambda: db_query())
+
+# Delete specific key
+cache.delete(cache_key)
+
+# Invalidate namespace
+cache.invalidate()
+```
+
+### Cache Stampede Protection
+
+Prevents multiple concurrent requests from hitting the database when cache expires.
+
+| Feature | Implementation |
+|---------|---------------|
+| **Request Coalescing** | Per-key `threading.Lock` - only 1 thread fetches |
+| **Stale-While-Revalidate** | Serves expired data (<30s) while refreshing in background |
+| **Background Refresh** | Daemon thread refreshes without blocking |
+| **Waiters** | `_results` dict shares result with waiting threads |
+
+### Redis Provider Selection
+
+Automatically benchmarks and selects the fastest Redis provider:
+
+```python
+# On startup, benchmarks both providers:
+# - UPSTASH_REDIS (Upstash)
+# - RAILWAY_REDIS_URL (Railway)
+
+# Benchmark results logged:
+{"event": "redis_benchmark", "provider": "railway", "avg_get_ms": 5.2}
+{"event": "redis_selected", "provider": "railway", "avg_get_ms": 5.2}
+```
+
+### Payload Optimization
+
+| Data Size | Action |
+|-----------|--------|
+| < 100KB | Store as JSON string |
+| > 100KB | Gzip compress + store as hex |
+
+Typical compression: **43x reduction** for large datasets.
+
+---
+
+## Structured Logging System
+
+### Log Format
+
+All logs are JSON-structured with consistent fields:
+
+```json
+{
+  "timestamp": "2026-03-26T10:30:00.123456+00:00",
+  "level": "INFO",
+  "logger": "worker.tasks",
+  "message": "Sync completed",
+  "event": "sync_completed",
+  "job_id": "abc123",
+  "platform": "codeforces",
+  "total": 1000,
+  "success_count": 980,
+  "failed_count": 20,
+  "duration_ms": 125.45
+}
+```
+
+### Key Events
+
+| Event | Description |
+|-------|-------------|
+| `sync_started` | Sync task began processing |
+| `sync_completed` | Sync task finished successfully |
+| `sync_failed` | Sync task encountered error |
+| `retry_triggered` | Retry initiated for failed students |
+| `lock_acquired` | Redis lock obtained |
+| `lock_rejected` | Lock denied (already held) |
+| `lock_released` | Lock released |
+| `cache_hit` | Cache data found (with source: memory/redis) |
+| `cache_miss` | Cache data not found |
+| `cache_set` | Data stored in cache |
+| `cache_stale_served` | Expired data served while refreshing |
+| `cache_refreshed` | Background refresh completed |
+| `cache_lock_acquired` | DB fetch lock obtained |
+| `cache_waiting` | Request waiting for other thread |
+| `http_request` | API request completed |
+
+### Suppressed Logs
+
+External library logs are silenced to reduce noise:
+
+- `uvicorn.access` → WARNING
+- `httpx` → WARNING
+- `httpcore` → WARNING
+- `urllib3` → WARNING
+
+---
 
 ## Database Schema
 
@@ -130,6 +315,23 @@ A FastAPI-based backend service for tracking and analyzing competitive programmi
 | rating_changes | JSONB | DEFAULT [] |
 | updated_at | TIMESTAMP | DEFAULT NOW() |
 
+#### 7. `sync_jobs` - Sync Job Tracking (V2)
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | UUID | PRIMARY KEY |
+| platform | TEXT | NOT NULL |
+| status | TEXT | pending/running/success/failed |
+| total_students | INT | DEFAULT 0 |
+| processed_students | INT | DEFAULT 0 |
+| success_count | INT | DEFAULT 0 |
+| failed_count | INT | DEFAULT 0 |
+| failed_students | JSONB | DEFAULT [] |
+| error_message | JSONB | - |
+| triggered_by | TEXT | api/cron/admin |
+| started_at | TIMESTAMP | - |
+| completed_at | TIMESTAMP | - |
+| created_at | TIMESTAMP | DEFAULT NOW() |
+
 ---
 
 ## API Endpoints
@@ -139,445 +341,184 @@ A FastAPI-based backend service for tracking and analyzing competitive programmi
 http://localhost:8000
 ```
 
+### Health & Status
+
+#### GET `/health`
+```json
+{"status": "ok", "supabase_connected": true}
+```
+
+#### GET `/cache/stats`
+```json
+{
+  "memory": {"total": 5, "expired": 1},
+  "redis_providers": ["upstash", "railway"],
+  "selected_redis": "railway",
+  "redis_stats": {"railway": {"avg_get_ms": 5.2, "avg_set_ms": 3.1}}
+}
+```
+
 ### Authentication
 
 #### POST `/login`
 Admin login for cookie-based authentication.
 
-**Request Body:**
-```json
-{
-  "username": "admin",
-  "password": "Admin@123"
-}
-```
-
-**Response:**
-```json
-{
-  "message": "Login successful",
-  "authenticated": true
-}
-```
-
----
-
 ### Students
 
-#### GET `/students`
-Get all students.
-
-**Response:** Array of student objects
-
----
-
-#### GET `/students/roll/{roll_no}`
-Get student by roll number.
-
-**Parameters:**
-- `roll_no` (path) - Student's roll number
-
-**Response:**
-```json
-{
-  "id": "uuid",
-  "roll_no": "22CS001",
-  "name": "John Doe",
-  "department": "CSE",
-  "section": "A",
-  "year": 2022,
-  "hackerrank_username": "john123"
-}
-```
-
----
-
-#### POST `/students`
-Add a new student.
-
-**Request Body:**
-```json
-{
-  "roll_no": "22CS001",
-  "name": "John Doe",
-  "department": "CSE",
-  "section": "A",
-  "year": 2022,
-  "hackerrank_username": "john123"
-}
-```
-
----
-
-#### PATCH `/students/{roll_no}`
-Update student (partial update - only provided fields are updated).
-
-**Parameters:**
-- `roll_no` (path) - Student's roll number
-
-**Request Body (all fields optional):**
-```json
-{
-  "name": "Jane Doe",
-  "department": "IT",
-  "section": "B",
-  "year": 2022,
-  "hackerrank_username": "jane123",
-  "leetcode_id": "jane_leetcode",
-  "codeforces_id": "jane_cf",
-  "codechef_id": "jane_cc"
-}
-```
-
----
-
-#### POST `/students/bulk`
-Bulk upload students from CSV file.
-
-**Form Data:**
-- `file` - CSV file with columns: `roll_no`, `name`, `department`, `section`, `year`, `hackerrank_username`
-
----
-
-#### DELETE `/students/{student_id}`
-Delete student by UUID.
-
----
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/students` | Get all students (cached) |
+| GET | `/students/roll/{roll_no}` | Get student by roll number |
+| POST | `/students` | Add new student |
+| PATCH | `/students/{roll_no}` | Update student |
+| POST | `/students/bulk` | Bulk upload from CSV |
+| DELETE | `/students/{student_id}` | Delete student |
 
 ### Leaderboard
 
-#### POST `/leaderboard`
-Add a single leaderboard entry.
-
-**Request Body:**
-```json
-{
-  "contest_name": "Weekly Contest 123",
-  "contest_date": "2024-01-15",
-  "username": "john123",
-  "score": 450,
-  "time_taken": 120
-}
-```
-
----
-
-#### POST `/leaderboard/bulk`
-Bulk upload leaderboard entries.
-
-**Request Body:**
-```json
-[
-  {
-    "contest_name": "Weekly Contest 123",
-    "username": "john123",
-    "score": 450
-  },
-  {
-    "contest_name": "Weekly Contest 123",
-    "username": "jane123",
-    "score": 420
-  }
-]
-```
-
----
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/leaderboard` | Get leaderboard entries |
+| POST | `/leaderboard` | Add single entry |
+| POST | `/leaderboard/bulk` | Bulk upload entries |
 
 ### Platforms
 
-#### GET `/platforms`
-Get all student platform mappings.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/platforms` | Get all platform mappings (cached) |
+| POST | `/platforms` | Add platform entry |
+| PATCH | `/platforms/{roll_no}` | Update platform IDs |
+| POST | `/platforms/bulk` | Bulk upload |
+| POST | `/platforms/csv` | Upload from CSV |
 
----
+### Analytics (V1 - Synchronous)
 
-#### POST `/platforms`
-Add platform IDs for a student.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/analytics/department` | Department leaderboard (cached) |
+| GET | `/analytics/platform-department` | Platform-specific dept leaderboard |
+| GET | `/analytics/section` | Section leaderboard (cached) |
+| GET | `/analytics/top-students` | Top students (cached) |
+| GET | `/analytics/absent/{contest_name}` | Absent students |
+| GET | `/analytics/codeforces` | Codeforces analytics (cached) |
+| GET | `/analytics/codeforces/absent/*` | Codeforces absent tracking |
+| GET | `/analytics/codechef` | CodeChef analytics (cached) |
+| GET | `/analytics/codechef/absent/*` | CodeChef absent tracking |
+| GET | `/analytics/leetcode` | LeetCode analytics (cached) |
+| GET | `/analytics/frontend-data` | Aggregated frontend data (cached) |
 
-**Request Body:**
-```json
-{
-  "roll_no": "22CS001",
-  "leetcode_id": "john_leet",
-  "codeforces_id": "john_cf",
-  "codechef_id": "john_cc"
-}
-```
+### Sync V1 (Synchronous)
 
----
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/sync/all` | Sync all platforms |
+| POST | `/sync/hackerrank` | Sync HackerRank |
+| POST | `/sync/leetcode` | Sync LeetCode |
+| POST | `/sync/codeforces` | Sync Codeforces |
+| POST | `/sync/codechef` | Sync CodeChef |
+| GET | `/sync/jobs` | Get sync job history |
 
-#### PATCH `/platforms/{roll_no}`
-Update platform IDs for a student (partial update).
+### Sync V2 (Asynchronous with Celery)
 
-**Request Body:**
-```json
-{
-  "leetcode_id": "new_handle",
-  "codeforces_id": "new_cf"
-}
-```
-
----
-
-#### POST `/platforms/bulk`
-Bulk upload platform IDs.
-
-**Request Body:**
-```json
-[
-  {
-    "roll_no": "22CS001",
-    "leetcode_id": "john_leet",
-    "codeforces_id": "john_cf"
-  }
-]
-```
-
----
-
-#### POST `/platforms/csv`
-Upload platform IDs from CSV file.
-
-**Form Data:**
-- `file` - CSV with columns: `roll_no`, `leetcode_id`, `codeforces_id`, `codechef_id`
-
----
-
-### Analytics
-
-#### GET `/analytics/department`
-Department-wise leaderboard.
-
-**Query Parameters:**
-- `platform` (optional) - `hackerrank`, `leetcode`, `codeforces`, `codechef` (default: `hackerrank`)
-
-**Response:**
-```json
-[
-  {"department": "CSE", "total_score": 15000},
-  {"department": "IT", "total_score": 12000}
-]
-```
-
----
-
-#### GET `/analytics/platform-department`
-Get department leaderboard for specific platform.
-
-**Query Parameters:**
-- `platform` - `codeforces`, `codechef`
-
----
-
-#### GET `/analytics/section`
-Section-wise leaderboard.
-
-**Query Parameters:**
-- `platform` (optional) - `hackerrank` (default)
-
----
-
-#### GET `/analytics/top-students`
-Get top performing students.
-
-**Query Parameters:**
-- `platform` (optional) - `hackerrank` (default)
-- `limit` (optional) - Number of students (default: 10)
-
----
-
-#### GET `/analytics/absent/{contest_name}`
-Students who didn't participate in a specific contest.
-
-**Parameters:**
-- `contest_name` (path) - Name of the contest
-
----
-
-#### GET `/analytics/codeforces`
-Get Codeforces analytics for all students.
-
----
-
-#### GET `/analytics/codeforces/absent/{contest_name}`
-Codeforces students absent from specific contest.
-
----
-
-#### GET `/analytics/codeforces/absent`
-All Codeforces users with no stats.
-
----
-
-#### GET `/analytics/codechef`
-Get CodeChef analytics for all students.
-
----
-
-#### GET `/analytics/codechef/absent/{contest_name}`
-CodeChef students absent from specific contest.
-
----
-
-#### GET `/analytics/codechef/absent`
-All CodeChef users with no stats.
-
----
-
-### Sync (Data Fetching)
-
-#### POST `/sync/all`
-Sync all platforms in parallel.
-
----
-
-#### POST `/sync/hackerrank`
-Sync HackerRank leaderboard data.
-
----
-
-#### POST `/sync/leetcode`
-Sync LeetCode statistics for all students.
-
-**What it syncs:**
-- Contest ranking (weekly & biweekly)
-- Total problems solved (easy/medium/hard)
-- Today's solved count (easy/medium/hard)
-
----
-
-#### POST `/sync/codeforces`
-Sync Codeforces statistics for all students.
-
-**What it syncs:**
-- Current & max rating
-- Rank
-- Contribution points
-- Problems solved by difficulty
-- Recent contest participation (last 5 finished contests)
-
----
-
-#### POST `/sync/codechef`
-Sync CodeChef statistics for all students.
-
-**What it syncs:**
-- Current & max rating
-- Stars
-- Global & country rank
-- Total contests & problems solved
-
----
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/v2/sync/codeforces` | Trigger Codeforces sync |
+| GET | `/v2/sync/status/{task_id}` | Get task status |
+| GET | `/v2/sync/jobs` | List jobs (filters: limit, status, platform) |
+| GET | `/v2/sync/jobs/{id}` | Get job details |
+| GET | `/v2/sync/jobs/stuck/list` | Get stuck jobs (>15 min) |
+| GET | `/v2/sync/consistency-check` | Check lock/DB consistency |
+| POST | `/v2/sync/codeforces/retry/{job_id}` | Retry failed students |
 
 ### Chat (AI Assistant)
 
-#### POST `/chat/sql`
-Natural language to SQL query using Gemini AI.
-
-**Request Body:**
-```json
-{
-  "text": "Show me top 5 students from CSE department"
-}
-```
-
-**Response:**
-```json
-{
-  "query": "SELECT ...",
-  "data": [...],
-  "message": "Success"
-}
-```
-
----
-
-#### GET `/chat/models`
-List available Gemini models.
-
----
-
-## Data Flow
-
-### Sync Flow
-```
-1. Fetch students with platform IDs from database
-2. Create batches (50 students per batch)
-3. For each student:
-   a. Call external API (LeetCode/Codeforces/CodeChef)
-   b. Parse response
-   c. Calculate deltas (e.g., today's problems)
-   d. Upsert to stats table
-4. Clear relevant caches
-```
-
-### Cache Strategy
-```
-1. Check Redis first
-2. If miss, check in-memory cache
-3. If miss, query database
-4. Store result in both Redis (60s TTL) and memory (30s TTL)
-```
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/chat/sql` | Natural language to SQL |
+| GET | `/chat/models` | List available models |
 
 ---
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_KEY` | Supabase anon/public key |
-| `REDIS_URL` | Redis connection URL (optional) |
-| `GOOGLE_API_KEY` | Gemini API key for chat |
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `SUPABASE_URL` | Supabase project URL | Yes |
+| `SUPABASE_KEY` | Supabase anon/public key | Yes |
+| `UPSTASH_URL` | Upstash Redis URL | No |
+| `UPSTASH_TOKEN` | Upstash Redis token | No |
+| `RAILWAY_REDIS_URL` | Railway Redis URL | No |
+| `REDIS_URL` | Generic Redis URL (fallback) | No |
+| `CELERY_BROKER_URL` | Celery broker (Redis) | For V2 |
+| `CELERY_RESULT_BACKEND` | Celery result backend | For V2 |
+| `GOOGLE_API_KEY` | Gemini API key | For chat |
+| `CRON_BASE_URL` | Base URL for cron sync | For cron jobs |
 
 ---
 
 ## Running the Application
 
 ### Development
+
 ```bash
-# Activate virtual environment
-source venv/bin/activate
+# FastAPI server with structured logging
+uvicorn main:app --reload --log-level info
 
-# Run with auto-reload
-uvicorn main:app --reload
-
-# Run on specific port
-uvicorn main:app --reload --port 8000
+# Celery worker (for V2 sync)
+celery -A worker.celery_app worker --loglevel=info -Q sync --pool=solo
 ```
 
 ### Production
+
 ```bash
-# Run with gunicorn
+# With gunicorn
 gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker
+
+# With logging to file
+uvicorn main:app --log-level info 2>&1 | tee logs/app.log
 ```
 
 ---
 
-## Error Handling
+## File Structure
 
-All endpoints return consistent error format:
-```json
-{
-  "detail": "Error message description"
-}
 ```
-
-| Status Code | Meaning |
-|-------------|---------|
-| 400 | Bad Request - Invalid input |
-| 404 | Not Found - Resource doesn't exist |
-| 401 | Unauthorized - Invalid credentials |
-| 500 | Internal Server Error |
-
----
-
-## Rate Limiting & Retry Strategy
-
-The sync service implements:
-- **Exponential backoff** for failed API calls (1s, 2s, 4s delays)
-- **Semaphore-based concurrency** limiting (25 parallel requests)
-- **Batch processing** (50 students per batch)
-- **Sleep between batches** (1 second)
+├── main.py                    # FastAPI app entry point
+├── database.py                # Supabase + Redis + CacheService
+├── schemas.py                 # Pydantic models
+├── cron_sync.py               # Cron job for syncing
+├── requirements.txt
+├── docker-compose.yml
+│
+├── routers/                   # API route handlers
+│   ├── auth.py
+│   ├── students.py            # Uses CacheService
+│   ├── leaderboard.py         # Uses CacheService
+│   ├── analytics.py           # Uses CacheService
+│   ├── sync.py                # V1 sync endpoints
+│   ├── sync_v2.py             # V2 Celery endpoints
+│   ├── platforms.py           # Uses CacheService
+│   └── chat.py
+│
+├── services/
+│   └── job_service.py         # Job tracking service
+│
+├── worker/
+│   ├── celery_app.py          # Celery configuration
+│   └── tasks.py               # Background sync tasks
+│
+├── utils/
+│   ├── logger.py              # Structured logging + helpers
+│   └── lock.py                # Redis locking utilities
+│
+├── middleware/
+│   ├── __init__.py
+│   └── logging.py             # Request logging middleware
+│
+└── migrations/
+    └── 002_enhance_sync_jobs.sql
+```
 
 ---
 
@@ -590,5 +531,8 @@ supabase>=2.0.0
 httpx>=0.25.0
 pydantic>=2.0.0
 redis>=5.0.0
+celery>=5.3.0
 python-multipart>=0.0.6
+python-dotenv>=1.0.0
+gunicorn>=21.0.0
 ```
