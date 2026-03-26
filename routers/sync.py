@@ -160,9 +160,9 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
                 old_easy = old_stats.get("easy_solved", 0)
                 old_medium = old_stats.get("medium_solved", 0)
                 old_hard = old_stats.get("hard_solved", 0)
-                old_easy_today = old_stats.get("easy_today", 0) if old_stats.get("easy_today") is not None else old_easy
-                old_medium_today = old_stats.get("medium_today", 0) if old_stats.get("medium_today") is not None else old_medium
-                old_hard_today = old_stats.get("hard_today", 0) if old_stats.get("hard_today") is not None else old_hard
+                old_easy_today = old_stats.get("easy_today") if old_stats.get("easy_today") is not None else 0
+                old_medium_today = old_stats.get("medium_today") if old_stats.get("medium_today") is not None else 0
+                old_hard_today = old_stats.get("hard_today") if old_stats.get("hard_today") is not None else 0
                 
                 delta_easy = max(0, easy_solved - old_easy)
                 delta_medium = max(0, medium_solved - old_medium)
@@ -191,10 +191,10 @@ async def fetch_user(client: httpx.AsyncClient, student: Dict[str, Any], semapho
                 print(f"[{username}] DELTA: easy={delta_easy}, medium={delta_medium}, hard={delta_hard}, same_day={is_same_day}")
                 print(f"[{username}] TODAY: easy={easy_today}, medium={medium_today}, hard={hard_today}")
             else:
-                easy_today = easy_solved
-                medium_today = medium_solved
-                hard_today = hard_solved
-                print(f"[{username}] NEW USER - TODAY = TOTAL: easy={easy_today}, medium={medium_today}, hard={hard_today}")
+                easy_today = 0
+                medium_today = 0
+                hard_today = 0
+                print(f"[{username}] NEW USER - TODAY = 0: easy={easy_today}, medium={medium_today}, hard={hard_today}")
             
             rating = None
             if data["userContestRanking"]:
