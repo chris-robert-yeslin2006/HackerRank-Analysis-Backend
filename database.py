@@ -30,23 +30,39 @@ PAYLOAD_SIZE_THRESHOLD = 100 * 1024
 
 class MemoryCache:
     def __init__(self, default_ttl: int = 60):
-        self._cache: Dict[str, tuple[Any, float]] = {}
+        self._cache: Dict[str, tuple[Any, float, bool]] = {}
         self._lock = threading.Lock()
         self.default_ttl = default_ttl
     
     def get(self, key: str) -> Optional[Any]:
         with self._lock:
             if key in self._cache:
-                data, expiry = self._cache[key]
-                if time.time() < expiry:
-                    return data
+                data, expiry, is_stale = self._cache[key]
+                now = time.time()
+                if now < expiry:
+                    return data, is_stale
+                if now < expiry + 30:
+                    return data, True
                 del self._cache[key]
+        return None
+    
+    def get_stale(self, key: str) -> Optional[Any]:
+        with self._lock:
+            if key in self._cache:
+                data, expiry, is_stale = self._cache[key]
+                if time.time() < expiry + 30:
+                    return data, is_stale
         return None
     
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
         with self._lock:
             expiry = time.time() + (ttl or self.default_ttl)
-            self._cache[key] = (value, expiry)
+            self._cache[key] = (value, expiry, False)
+    
+    def set_with_stale(self, key: str, value: Any, ttl: Optional[int] = None, is_stale: bool = False) -> None:
+        with self._lock:
+            expiry = time.time() + (ttl or self.default_ttl)
+            self._cache[key] = (value, expiry, is_stale)
     
     def delete(self, key: str) -> None:
         with self._lock:
@@ -59,7 +75,7 @@ class MemoryCache:
     def stats(self) -> Dict[str, int]:
         with self._lock:
             now = time.time()
-            expired = sum(1 for _, exp in self._cache.values() if now >= exp)
+            expired = sum(1 for _, exp, _ in self._cache.values() if now >= exp + 30)
             return {"total": len(self._cache), "expired": expired}
 
 
@@ -228,37 +244,79 @@ class CacheService:
     def __init__(self, namespace: str = "cache", default_ttl: int = 60):
         self.namespace = namespace
         self.default_ttl = default_ttl
+        self._locks: Dict[str, threading.Lock] = {}
+        self._lock_manager = threading.Lock()
+        self._stale_ttl = 30
+        self._results: Dict[str, Any] = {}
     
     def _make_key(self, key: str) -> str:
         return f"{self.namespace}:{key}"
     
-    def get(self, key: str, fetch_func: Optional[Callable] = None) -> Optional[Any]:
+    def _get_lock(self, full_key: str) -> threading.Lock:
+        with self._lock_manager:
+            if full_key not in self._locks:
+                self._locks[full_key] = threading.Lock()
+            return self._locks[full_key]
+    
+    def _release_lock(self, full_key: str) -> None:
+        with self._lock_manager:
+            if full_key in self._locks:
+                lock = self._locks.pop(full_key)
+                try:
+                    lock.release()
+                except threading.ThreadError:
+                    pass
+    
+    def _wait_for_result(self, full_key: str, timeout: float = 10.0) -> Optional[Any]:
+        start = time.perf_counter()
+        while time.perf_counter() - start < timeout:
+            if full_key in self._results:
+                return self._results.pop(full_key, None)
+            time.sleep(0.01)
+        return None
+    
+    def get(self, key: str, fetch_func: Optional[Callable] = None, background_refresh: bool = True) -> Optional[Any]:
         full_key = self._make_key(key)
         start_total = time.perf_counter()
         
-        mem_start = time.perf_counter()
-        mem_hit = memory_cache.get(full_key)
-        mem_duration = (time.perf_counter() - mem_start) * 1000
-        
-        if mem_hit is not None:
-            data, compressed = mem_hit
-            parse_start = time.perf_counter()
-            result = _deserialize(data, compressed)
-            parse_duration = (time.perf_counter() - parse_start) * 1000
+        mem_result = memory_cache.get(full_key)
+        if mem_result is not None:
+            data, is_stale = mem_result
             
-            logger.info(
-                "Cache hit (L1)",
-                extra={
-                    "event": "cache_hit",
-                    "source": "memory",
-                    "key": key,
-                    "duration_ms": round((time.perf_counter() - start_total) * 1000, 2),
-                    "mem_fetch_ms": round(mem_duration, 2),
-                    "parse_ms": round(parse_duration, 2),
-                    "data_size": len(data) if isinstance(data, str) else len(data) // 2
-                }
-            )
-            return result
+            if not is_stale:
+                parse_start = time.perf_counter()
+                result = _deserialize(data, False)
+                parse_duration = (time.perf_counter() - parse_start) * 1000
+                
+                logger.info(
+                    "Cache hit (L1)",
+                    extra={
+                        "event": "cache_hit",
+                        "source": "memory",
+                        "key": key,
+                        "is_stale": False,
+                        "duration_ms": round((time.perf_counter() - start_total) * 1000, 2),
+                        "parse_ms": round(parse_duration, 2)
+                    }
+                )
+                return result
+            
+            if fetch_func and background_refresh:
+                logger.info(
+                    "Cache stale (L1) - background refresh",
+                    extra={
+                        "event": "cache_stale_served",
+                        "source": "memory",
+                        "key": key,
+                        "duration_ms": round((time.perf_counter() - start_total) * 1000, 2)
+                    }
+                )
+                parse_start = time.perf_counter()
+                result = _deserialize(data, False)
+                thread = threading.Thread(target=self._background_fetch, args=(key, fetch_func))
+                thread.daemon = True
+                thread.start()
+                return result
         
         redis = get_redis()
         if redis:
@@ -271,6 +329,7 @@ class CacheService:
                     data_dict = json.loads(raw_data)
                     data = data_dict["data"]
                     compressed = data_dict.get("compressed", False)
+                    is_stale = data_dict.get("is_stale", False)
                     
                     parse_start = time.perf_counter()
                     result = _deserialize(data, compressed)
@@ -278,22 +337,41 @@ class CacheService:
                     
                     data_size = data_dict.get("size", len(raw_data))
                     
-                    memory_cache.set(full_key, (data, compressed), self.default_ttl)
+                    if not is_stale:
+                        memory_cache.set_with_stale(full_key, (data, compressed), self.default_ttl, False)
+                    else:
+                        memory_cache.set_with_stale(full_key, (data, compressed), self._stale_ttl, True)
                     
-                    logger.info(
-                        "Cache hit (L2)",
-                        extra={
-                            "event": "cache_hit",
-                            "source": "redis",
-                            "provider": redis.provider,
-                            "key": key,
-                            "duration_ms": round((time.perf_counter() - start_total) * 1000, 2),
-                            "redis_fetch_ms": round(redis_duration, 2),
-                            "parse_ms": round(parse_duration, 2),
-                            "data_size": data_size,
-                            "compressed": compressed
-                        }
-                    )
+                    if is_stale and fetch_func and background_refresh:
+                        logger.info(
+                            "Cache stale (L2) - background refresh",
+                            extra={
+                                "event": "cache_stale_served",
+                                "source": "redis",
+                                "provider": redis.provider,
+                                "key": key,
+                                "duration_ms": round((time.perf_counter() - start_total) * 1000, 2)
+                            }
+                        )
+                        thread = threading.Thread(target=self._background_fetch, args=(key, fetch_func))
+                        thread.daemon = True
+                        thread.start()
+                    else:
+                        logger.info(
+                            "Cache hit (L2)",
+                            extra={
+                                "event": "cache_hit",
+                                "source": "redis",
+                                "provider": redis.provider,
+                                "key": key,
+                                "is_stale": is_stale,
+                                "duration_ms": round((time.perf_counter() - start_total) * 1000, 2),
+                                "redis_fetch_ms": round(redis_duration, 2),
+                                "parse_ms": round(parse_duration, 2),
+                                "data_size": data_size,
+                                "compressed": compressed
+                            }
+                        )
                     return result
                 except (json.JSONDecodeError, KeyError) as e:
                     logger.warning("Cache data corrupted", extra={"event": "cache_error", "key": key, "error": str(e)})
@@ -319,24 +397,100 @@ class CacheService:
             )
         
         if fetch_func:
-            db_start = time.perf_counter()
+            lock = self._get_lock(full_key)
+            
+            if lock.acquire(blocking=False):
+                try:
+                    logger.info(
+                        "Lock acquired",
+                        extra={"event": "cache_lock_acquired", "key": key}
+                    )
+                    
+                    db_start = time.perf_counter()
+                    result = fetch_func()
+                    db_duration = (time.perf_counter() - db_start) * 1000
+                    
+                    if result is not None:
+                        self.set(key, result)
+                        
+                        logger.info(
+                            "Data fetched from DB",
+                            extra={
+                                "event": "db_fetch",
+                                "key": key,
+                                "db_fetch_ms": round(db_duration, 2)
+                            }
+                        )
+                    return result
+                finally:
+                    self._release_lock(full_key)
+            else:
+                logger.info(
+                    "Waiting for lock",
+                    extra={"event": "cache_waiting", "key": key}
+                )
+                
+                result = self._wait_for_result(full_key)
+                if result is not None:
+                    logger.info(
+                        "Got result from another thread",
+                        extra={"event": "cache_result_received", "key": key}
+                    )
+                    return result
+                
+                db_start = time.perf_counter()
+                result = fetch_func()
+                db_duration = (time.perf_counter() - db_start) * 1000
+                
+                if result is not None:
+                    self.set(key, result)
+                    logger.info(
+                        "Data fetched (fallback)",
+                        extra={
+                            "event": "db_fetch",
+                            "key": key,
+                            "db_fetch_ms": round(db_duration, 2)
+                        }
+                    )
+                return result
+        
+        return None
+    
+    def _background_fetch(self, key: str, fetch_func: Callable) -> None:
+        full_key = self._make_key(key)
+        lock = self._get_lock(full_key)
+        
+        if not lock.acquire(blocking=False):
+            return
+        
+        try:
+            start = time.perf_counter()
             result = fetch_func()
-            db_duration = (time.perf_counter() - db_start) * 1000
+            duration_ms = (time.perf_counter() - start) * 1000
             
             if result is not None:
                 self.set(key, result)
+                self._results[full_key] = result
                 
                 logger.info(
-                    "Data fetched from DB",
+                    "Background refresh complete",
                     extra={
-                        "event": "db_fetch",
+                        "event": "cache_refreshed",
                         "key": key,
-                        "db_fetch_ms": round(db_duration, 2)
+                        "duration_ms": round(duration_ms, 2)
                     }
                 )
-            return result
-        
-        return None
+        except Exception as e:
+            logger.warning(
+                "Background refresh failed",
+                extra={
+                    "event": "cache_refresh_error",
+                    "key": key,
+                    "error": str(e)
+                }
+            )
+        finally:
+            self._release_lock(full_key)
     
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
         full_key = self._make_key(key)
@@ -360,7 +514,7 @@ class CacheService:
         redis = get_redis()
         if redis:
             redis_start = time.perf_counter()
-            cache_data = json.dumps({"data": data_str, "compressed": compressed, "size": size})
+            cache_data = json.dumps({"data": data_str, "compressed": compressed, "size": size, "is_stale": False})
             redis.set(full_key, cache_data, ex=ttl)
             redis_duration = (time.perf_counter() - redis_start) * 1000
             
